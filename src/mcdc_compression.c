@@ -1,0 +1,1130 @@
+/*
+ * Copyright (c) 2025 Vladimir Rodionov
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/*
+ * mcdc_compression.c
+ *
+ * Implementation of Zstd compression/decompression for MC/DC.
+ *
+ * Key duties:
+ *   - Manage Zstd CCtx/DCtx instances and dictionary attachments.
+ *   - Provide fast-path compression and decompression entry points.
+ *   - Handle integration with dictionary router table and trainer thread.
+ *   - Maintain thread-local caches to reduce allocation churn.
+ *
+ * Notes:
+ *   - Hot-path code avoids locks; relies on atomics and TLS.
+ *   - Trainer thread may update global dictionary table asynchronously.
+ *   - Always validate dictionary IDs and namespaces before use.
+ */
+#if defined(__APPLE__)
+  #ifndef _DARWIN_C_SOURCE
+  #define _DARWIN_C_SOURCE 1
+  #endif
+#else
+  #ifndef _POSIX_C_SOURCE
+  #define _POSIX_C_SOURCE 200809L
+  #endif
+#endif
+#include "mcdc_compression.h"
+#define ZDICT_STATIC_LINKING_ONLY
+#include <unistd.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+
+#include <errno.h>
+#include <assert.h>
+#include <unistd.h>
+#include <zdict.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <limits.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include "mcdc_incompressible.h"
+#include "mcdc_utils.h"
+#include "mcdc_gc.h"
+#include "mcdc_dict_pool.h"
+#include "mcdc_eff_atomic.h"
+#include "mcdc_sampling.h"
+
+
+static __thread tls_cache_t tls; /* zero-initialised */
+
+/* ---------- zstd context --------------------------------------------- */
+mcdc_ctx_t g_mcz = { 0 };
+
+/* ---------- zstd context helpers ------------------------------------ */
+const mcdc_ctx_t *mcdc_ctx(void)      { return &g_mcz; }
+mcdc_ctx_t       *mcdc_ctx_mut(void)  { return &g_mcz; }
+
+
+static const mcdc_table_t *mcdc_current_table(void) {
+    const mcdc_ctx_t *ctx = mcdc_ctx();
+    return (const mcdc_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+}
+
+/* ---------- helper macros ------------------------------------------- */
+
+#define KB(x)  ((size_t)(x) << 10)
+#define MB(x)  ((size_t)(x) << 20)
+#define CHECK_Z(e) do { size_t _r = (e); \
+  if (ZSTD_isError(_r)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, ZSTD_getErrorName(_r));} \
+} while (0)
+
+/* sane absolute limits */
+enum {
+    ZSTD_LVL_MIN   = 1,
+    ZSTD_LVL_MAX   = 22,
+    ZSTD_DICT_MAX  = MB(1),   /* upstream hard-limit */
+    ZSTD_VALUE_MAX = KB(256),  /* arbitrary safety cap, usually must be much less*/
+    ZSTD_VALUE_MIN = 16        /* absolute min size of a value for compression */
+};
+
+static int attach_cfg(void)
+{
+    mcdc_cfg_t *cfg =  mcdc_config_get();
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    ctx->cfg = cfg;
+    if (!cfg->enable_comp) {
+        return -EINVAL;
+    }
+    /* 1. Compression level ---------------------------------------- */
+    int lvl = cfg->zstd_level;
+    if (lvl == 0)                           /* 0 = default (3) */
+        lvl = 3;
+    if (lvl < ZSTD_LVL_MIN || lvl > ZSTD_LVL_MAX) {
+        if (cfg->verbose > 1) {
+            fprintf(stderr,
+                    "ERROR: zstd level %d out of range [%d..%d]\n",
+                    lvl, ZSTD_LVL_MIN, ZSTD_LVL_MAX);
+        }
+        return -EINVAL;
+    }
+    cfg->zstd_level = lvl;
+
+    /* 2. Dictionary size ------------------------------------------ */
+    size_t dict_sz = cfg->dict_size;
+    if (dict_sz == 0) dict_sz = KB(112);      /* good default */
+    if (dict_sz > ZSTD_DICT_MAX) dict_sz = ZSTD_DICT_MAX;
+    cfg->dict_size = dict_sz;
+
+    if (cfg->min_comp_size > cfg->max_comp_size ||
+        cfg->max_comp_size > ZSTD_VALUE_MAX) {
+        if (cfg->verbose > 1) {
+            fprintf(stderr,
+                    "ERROR: invalid zstd min/max comp size (%zu / %zu)\n",
+                    cfg->min_comp_size, cfg->max_comp_size);
+        }
+        return -EINVAL;
+    }
+    return 0;
+}
+
+/* This is 'memcached` specific API call. We do not support "chunked items",
+ therefore must know in advance the maximum chunk size to disable compression for values larger than */
+
+int mcdc_set_max_value_limit(size_t limit){
+    mcdc_cfg_t *cfg =  mcdc_config_get();
+    if (cfg->max_comp_size >= limit){
+        cfg->max_comp_size = limit - 1;
+        if (cfg->max_comp_size > ZSTD_VALUE_MAX){
+            cfg->max_comp_size = ZSTD_VALUE_MAX;
+        }
+        if (cfg->verbose > 1) {
+            fprintf(stderr,
+                    "WARN: set maximum value size for compresion to %zu\n",
+                    cfg->max_comp_size);
+        }
+    }
+    if (cfg->min_comp_size > cfg->max_comp_size ||
+        cfg->max_comp_size > ZSTD_VALUE_MAX) {
+        if (cfg->verbose > 1) {
+            fprintf(stderr,
+                    "ERROR: invalid zstd min/max comp size (%zu / %zu)\n",
+                    cfg->min_comp_size, cfg->max_comp_size);
+        }
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static void tls_ensure(size_t need) {
+    if (!tls.cctx) {
+        tls.cctx = ZSTD_createCCtx();
+        CHECK_Z(ZSTD_CCtx_setParameter(tls.cctx, ZSTD_c_checksumFlag, 0));
+        CHECK_Z(ZSTD_CCtx_setParameter(tls.cctx, ZSTD_c_dictIDFlag, 0));
+    }
+    if (!tls.dctx)
+        tls.dctx = ZSTD_createDCtx();
+    if (need > tls.cap) {
+        tls.scratch = realloc(tls.scratch, need);
+        tls.cap = need;
+    }
+}
+
+static void reload_status_dump(const mcdc_reload_status_t *st)
+{
+    int buflen = 512;
+    char buf[buflen];
+    if (!st) return;
+
+    int n;
+    if (st->rc == 0) {
+        n = snprintf(buf, buflen,
+                     "MCZ-LOAD-DICTS: OK\n"
+                     "  Namespaces:    %u\n"
+                     "  Dicts Loaded:  %u\n"
+                     "  Dicts New:     %u\n"
+                     "  Dicts Reused:  %u\n"
+                     "  Dicts Failed:  %u\n",
+                     st->namespaces,
+                     st->dicts_loaded,
+                     st->dicts_new,
+                     st->dicts_reused,
+                     st->dicts_failed);
+    } else {
+        n = snprintf(buf, buflen,
+                     "MCZ-LOAD_DICTS: ERROR (rc=%d)\n"
+                     "  Message: %s\n"
+                     "  Namespaces:    %u\n"
+                     "  Dicts Loaded:  %u\n"
+                     "  Dicts New:  %u\n"
+                     "  Dicts Reused:  %u\n"
+                     "  Dicts Failed:  %u\n",
+                     st->rc,
+                     st->err[0] ? st->err : "(none)",
+                     st->namespaces,
+                     st->dicts_loaded,
+                     st->dicts_new,
+                     st->dicts_reused,
+                     st->dicts_failed);
+    }
+
+    if (n < 0 || (size_t)n >= 512) {
+        /* truncated or error */
+        buf[buflen - 1] = '\0';
+    }
+    printf("=== MC/DC Load Dictionaries Status ===\n%s", buf);
+}
+
+static void build_reload_status(mcdc_table_t *newt,
+                                    mcdc_table_t *oldt, mcdc_reload_status_t *st) {
+    if (!st) return;
+    st->rc = 0;
+    if (!newt) {
+        st->rc = -EINVAL;
+        snprintf(st->err, sizeof(st->err), "new table is NULL");
+        return;
+    }
+    st->namespaces = (uint32_t)newt->nspaces;
+    /* Walk through all dict metas by_id in new table. */
+    for (size_t i = 0; i < 65536; i++) {
+        if(newt->by_id[i]) {
+            st->dicts_loaded++;
+            if(oldt && oldt->by_id[i]) {
+                st->dicts_reused++;
+            } else {
+                st->dicts_new++;
+            }
+        } else if(oldt && oldt->by_id[i]) {
+            st->dicts_retired++;
+        }
+    }
+    /* TODO: dicts_failed could be set if metas has some error marker */
+    st->dicts_failed = 0;
+}
+
+/* ---------------------------------------------------------------------
+ * load dictionaries from a FS
+ *   If dict_path == NULL it returns 1 (nothing loaded, continue live training).
+ *   On I/O/alloc/ZSTD errors returns a negative errno.
+ * ------------------------------------------------------------------- */
+static int mcdc_load_dicts(void) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    if (!ctx->cfg->dict_dir)
+        return 1; /* nothing to load, continue live training */
+    if (!ctx->cfg->enable_dict){
+        return 1;
+    }
+    char *err = NULL;
+    mcdc_reload_status_t *st = calloc(1, sizeof(*st));
+
+    mcdc_table_t *tab = mcdc_scan_dict_dir(ctx->cfg->dict_dir, ctx->cfg->dict_retain_max,
+                                         ctx->cfg->gc_quarantine_period, ctx->cfg->zstd_level, &err);
+    if (err != NULL){
+        fprintf(stderr, "load dictionaries failed: %s\n", err ? err : "unknown error");
+        st->rc = -ENOENT;
+        snprintf(st->err, sizeof(st->err), "load dictionaries failed: %s\n", err ? err : "unknown error");
+        free(err);
+        if (!tab) return 1;
+    }
+    if (tab) {
+        atomic_store_explicit(&ctx->dict_table, (uintptr_t)tab, memory_order_release);
+        build_reload_status(tab, NULL, st);
+        if(ctx->cfg->verbose > 1) {
+            reload_status_dump(st);
+        }
+        free(st);
+    } else {
+        return 1;
+    }
+    return 0;
+}
+
+static inline bool is_training_active(void) {
+    const mcdc_ctx_t *c = mcdc_ctx();
+    /* any cheap acquire fence is fine; on x86 it's a compiler barrier */
+    atomic_thread_fence(memory_order_acquire);
+    return c->train_active;
+}
+
+static inline void set_training_active(bool active){
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    atomic_store(&ctx->train_active, active);
+}
+
+
+static size_t train_fastcover(void* dictBuf, size_t dictCap,
+                            const void* samplesBuf, const size_t* sampleSizes, unsigned nbSamples)
+{
+
+    size_t got = ZDICT_trainFromBuffer(
+        dictBuf, dictCap, samplesBuf, sampleSizes, nbSamples);
+
+    return got; /* check ZDICT_isError(got) / ZDICT_getErrorName(got) */
+}
+
+
+static size_t train_fastcover_optimize(void* dictBuf, size_t dictCap,
+                                const void* samplesBuf, const size_t* sampleSizes, unsigned nbSamples)
+{
+    int targetLevel = mcdc_ctx()->cfg->zstd_level;
+    ZDICT_fastCover_params_t p;                /* advanced; requires ZDICT_STATIC_LINKING_ONLY */
+    memset(&p, 0, sizeof(p));                  /* 0 => defaults; also enables search for k/d/steps */
+    /* Leave at 0 to ENABLE search (fastCover’s optimizer will vary these) */
+    p.k     = 0;   /* segment size */
+    p.d     = 0;   /* dmer size    */
+    p.steps = 0;   /* number of k points to try */
+
+    /* fastCover-specific knobs */
+    p.f     = 0;   /* log2(feature-buckets). 0 = let optimizer choose; note memory ~ 6*2^f per thread */
+    p.accel = 0;   /* 0 = default (1); higher is faster/less accurate */
+    p.nbThreads = 1;       /* grows memory per thread */
+    p.splitPoint = 0.0;    /* 0.0 → default 0.75/0.25 split */
+
+    /* Optional shrink-to-fit dictionary selection */
+    p.shrinkDict = 0;                 /* 1 = try smaller dict sizes */
+    p.shrinkDictMaxRegression = 0;    /* % regression allowed vs max dict */
+
+    /* Header / stats options */
+    p.zParams.compressionLevel   = targetLevel;
+    p.zParams.notificationLevel  = 0;
+    p.zParams.dictID             = 0;
+
+    size_t got = ZDICT_optimizeTrainFromBuffer_fastCover(
+        dictBuf, dictCap, samplesBuf, sampleSizes, nbSamples, &p);
+
+    return got; /* check ZDICT_isError(got) */
+}
+
+static size_t train_dictionary(void* dictBuf, size_t dictCap,
+                                const void* samplesBuf, const size_t* sampleSizes, unsigned nbSamples)
+{
+    const mcdc_ctx_t *ctx = mcdc_ctx();
+    mcdc_train_mode_t mode = ctx->cfg->train_mode;
+    if (mode == MCDC_TRAIN_FAST) {
+        return train_fastcover(dictBuf, dictCap,
+                                    samplesBuf, sampleSizes, nbSamples);
+    } else {
+        return train_fastcover_optimize(dictBuf, dictCap,
+                                    samplesBuf, sampleSizes, nbSamples);
+    }
+}
+
+
+/* ---------- trainer thread ------------------------------------------ */
+static void* trainer_main(void *arg) {
+    mcdc_ctx_t *ctx = arg;
+    const size_t max_dict = ctx->cfg->dict_size ? ctx->cfg->dict_size : 110 * 1024;
+    const size_t train_threshold =
+        ctx->cfg->min_training_size ? ctx->cfg->min_training_size : max_dict * 100; /* 100× rule */
+    time_t started = time(NULL);
+
+    for (;;) {
+        sleep_ms(1000); // 1000 ms
+
+        bool need_training = false;
+        bool success = false;
+
+        /* Decide if training should be active (sticky until success/admin-off) */
+        const mcdc_table_t* tab = (const mcdc_table_t*) atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+        if(!mcdc_has_default_dict(tab)) {
+            need_training = true; /* bootstrap */
+        } else if (mcdc_eff_should_retrain((uint64_t)time(NULL))) {
+            need_training = true;
+        }
+
+        if (need_training) set_training_active(true);
+        if (!is_training_active()) continue;
+
+        /* Threshold gate */
+        size_t pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
+
+        time_t started_train = time(NULL);
+
+        if (pending < train_threshold) continue;
+
+        /* get statistics for "default" namespace*/
+        mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_ns("default", 7);
+        if (stats) atomic_inc64(&stats->trainer_runs, 1);
+
+        /* Take ownership of sample list */
+        sample_node_t *list = atomic_exchange_explicit(&ctx->samples_head, NULL, memory_order_acq_rel);
+        if (!list) {
+            if (stats) atomic_inc64(&stats->trainer_errs, 1);
+            continue;
+        }
+
+        /* Count and size accumulation with overflow guard */
+        size_t count = 0, total = 0;
+        for (sample_node_t *p = list; p; p = p->next) {
+            count++;
+            if (SIZE_MAX - total < p->len) { /* overflow */
+                // Drop this batch safely
+                for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
+                // Best-effort correction; avoid underflow on concurrent updates
+                size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
+                size_t dec = now_pending < pending ? now_pending : pending;
+                atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
+                continue;
+            }
+            total += p->len;
+        }
+        if (count == 0 || total == 0) {
+            // Return budget and continue
+            size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
+            size_t dec = total <= now_pending ? total : now_pending;
+            atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
+            // free empty list (shouldn’t happen)
+            for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
+            if (stats) atomic_inc64(&stats->trainer_errs, 1);
+            continue;
+        }
+
+        size_t *sizes = (size_t*)malloc(sizeof(size_t) * count);
+        char   *buff  = (char*)malloc(total);
+        if (!sizes || !buff) {
+            // OOM: drop batch
+            for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
+            free(sizes); free(buff);
+            size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
+            size_t dec = total <= now_pending ? total : now_pending;
+            atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
+            if (stats) {
+                atomic_inc64(&stats->trainer_errs, 1);
+                atomic_set64(&stats->reservoir_bytes, 0);
+                atomic_set64(&stats->reservoir_items, 0);
+            }
+            continue;
+        }
+
+        /* Flatten samples */
+        sample_node_t *n = list;
+        size_t off = 0;
+        for (size_t i = 0; i < count; ++i, n = n->next) {
+            sizes[i] = n->len;
+            memcpy(buff + off, n->buf, n->len);
+            off += n->len;
+        }
+
+        /* Train dictionary */
+        void *dict = calloc(1, max_dict);
+        if (!dict) {
+            for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
+            free(buff); free(sizes);
+            size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
+            size_t dec = total <= now_pending ? total : now_pending;
+            atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
+            atomic_inc64(&stats->trainer_errs, 1);
+            continue;
+        }
+        size_t dict_sz = train_dictionary(dict, max_dict, buff, sizes, count);
+
+        if (ZSTD_isError(dict_sz)) {
+            if (ctx->cfg->verbose > 1) {
+                log_rate_limited(10ULL * 1000000ULL,
+                    "mcz-dict: TRAIN ERROR %s (samples=%zu, bytes=%zu)\n",
+                    ZSTD_getErrorName(dict_sz), count, total);
+            }
+            if (stats) atomic_inc64(&stats->trainer_errs, 1);
+        } else if (dict_sz < 1024) {
+            if (ctx->cfg->verbose > 1) {
+                log_rate_limited(10ULL * 1000000ULL,
+                    "mcz-dict: dict too small (%zu B, need ≥1 KiB)\n", dict_sz);
+            }
+            if (stats) atomic_inc64(&stats->trainer_errs, 1);
+        } else {
+            if (ctx->cfg->verbose > 1) {
+                log_rate_limited(1000000ULL,
+                    "mcz-dict: new dict (%zu B) built from %zu samples\n", dict_sz, count);
+            }
+
+            /* Persist dict + manifest (global namespace) */
+            char *err = NULL;
+            time_t created = time(NULL);  /* single timestamp */
+            int rc = mcdc_save_dictionary_and_manifest(
+                         ctx->cfg->dict_dir,
+                         dict, dict_sz,
+                         NULL, 0,
+                         ctx->cfg->zstd_level,
+                         NULL,
+                         created,
+                         0,
+                         NULL, /* out_meta not needed here */
+                         &err);
+            if (rc == 0) {
+                (void)mcdc_reload_dictionaries();
+                success = true;
+            } else {
+                fprintf(stderr, "save failed: %s\n", err ? err : "unknown error");
+                free(err);
+                if (stats) atomic_inc64(&stats->trainer_errs, 1);
+            }
+        }
+
+        /* Return consumed bytes exactly once (guard underflow on races) */
+        size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
+        size_t dec = total <= now_pending ? total : now_pending;
+        atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
+
+        /* Free temps and list */
+        free(dict);
+        for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
+        free(buff);
+        free(sizes);
+        uint64_t now = (uint64_t)time(NULL);
+        if (stats) {
+            atomic_set64(&stats->reservoir_bytes, 0);
+            atomic_set64(&stats->reservoir_items, 0);
+            atomic_set64(&stats->trainer_ms_last, now * 1000);
+        }
+        if (success) {
+            set_training_active(false);               /* stop sampling until EWMA triggers again */
+            mcdc_eff_mark_retrained(now);
+        }
+        time_t finished = time(NULL);
+        if (ctx->cfg->verbose > 1)
+            fprintf(stderr, "[mcdc] traininig time: %lds from start: %ld\n", finished - started_train, finished - started);
+    }
+
+    /* never reached */
+    return NULL;
+}
+
+static int mcdc_start_trainer(mcdc_ctx_t *ctx){
+    if (!ctx)
+        return -ENOMEM;
+    if (!ctx->cfg->enable_comp){
+        return 0;
+    }
+    if (ctx->cfg->enable_training && ctx->cfg->enable_dict){
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        pthread_create(&ctx->trainer_tid, &attr, trainer_main, ctx);
+        pthread_attr_destroy(&attr);
+        if (ctx->cfg->verbose > 1) {
+            log_rate_limited(1000000ULL,
+                             "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg->dict_size);
+        }
+    }
+    return 0;
+}
+
+/* ---------- public init / destroy ----------------------------------- */
+int mcdc_init(void) {
+    mcdc_init_default_config();
+    attach_cfg();
+
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    if (!ctx)
+        return -ENOMEM;
+
+    if (!ctx->cfg->enable_comp){
+        return 0;
+    }
+    mcdc_config_sanity_check();
+
+    mcdc_cfg_t *cfg = ctx->cfg;
+    /* atomic pointers / counters */
+    atomic_init(&ctx->samples_head, NULL); /* empty list            */
+    atomic_init(&ctx->bytes_pending, 0);
+    ctx->trainer_tid = (pthread_t ) { 0 }; /* will be set by trainer thread */
+
+    /* ---------------- init statistics module ----------------------------*/
+    mcdc_stats_registry_global_init(0);
+
+    if (!cfg->enable_dict) {
+        return 0;
+    }
+
+    /* try external dictionary first */
+    mcdc_load_dicts();
+
+    mcdc_train_cfg_t ecfg = {
+        .enable_training = true,
+        .retraining_interval_s = ctx->cfg->retraining_interval_s,
+        .min_training_size = ctx->cfg->min_training_size,
+        .ewma_alpha = ctx->cfg->ewma_alpha,
+        .retrain_drop = ctx->cfg->retrain_drop
+    };
+
+    mcdc_eff_configure(&ecfg);                 /* single-threaded init */
+    mcdc_eff_init((uint64_t)time(NULL));
+
+    /* ---------------- init retired dictionaries pool --------------------- */
+    mcdc_dict_pool_init();
+    /* ---------------- spawn background trainer --------------------------- */
+    mcdc_start_trainer(ctx);
+    /* ---------------- spawn background garbage collector ------------------ */
+    mcdc_gc_start(ctx);
+    if (cfg->verbose > 1) {
+        log_rate_limited(0ULL,
+                         "mcz: GC thread started\n");
+    }
+    /* ---------------  initialize sampler subsystem --------------------------*/
+    mcdc_sampler_init(cfg->spool_dir, cfg->sample_p, cfg->sample_window_duration, cfg->spool_max_bytes);
+    return 0;
+}
+
+void mcdc_destroy(void) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+
+    /* note: trainer thread is detached and loops forever; in production
+     we may add a stop flag + join, or just let process exit */
+
+    /* free thread-local caches for the calling thread . TODO: other threads?*/
+    if (tls.scratch) {
+        free(tls.scratch);
+        tls.scratch = NULL;
+        tls.cap = 0;
+    }
+    if (tls.cctx) {
+        ZSTD_freeCCtx(tls.cctx);
+        tls.cctx = NULL;
+    }
+    if (tls.dctx) {
+        ZSTD_freeDCtx(tls.dctx);
+        tls.dctx = NULL;
+    }
+    mcdc_stats_registry_global_destroy();
+    mcdc_dict_pool_shutdown();
+    mcdc_gc_stop(ctx);
+
+}
+
+static void sample_for_training(const void *key, size_t klen, const void *src, size_t len) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    /* skip very large and very small items */
+    if (len >ctx->cfg->max_comp_size || len < ctx->cfg->min_comp_size)
+        return;
+    if (!is_training_active()) /* skip if training is not active */
+        return;
+    const mcdc_table_t* tab = (const mcdc_table_t*) atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+    bool empty_state = !mcdc_has_default_dict(tab);
+    double p = empty_state? 1.0: ctx->cfg->sample_p;
+
+    /* Suppose p is in [0,1]. Represent it as fixed-point threshold: */
+    uint32_t threshold = (uint32_t)((double)UINT32_MAX * p);
+
+    if (fast_rand32() > threshold) {
+        return;
+    }
+
+    if (is_likely_incompressible((const uint8_t *) src, len)){
+        return;
+    }
+
+    /* Check if default namespace for this key*/
+    if (tab && !mcdc_is_default_ns(tab, key, klen)){
+        return;
+    }
+
+    /* ---- back-pressure: stop once corpus ≥ min_train_bytes ---------- */
+    size_t limit =
+            ctx->cfg->min_training_size ?
+                    ctx->cfg->min_training_size : ctx->cfg->dict_size * 100; /* 100× rule */
+
+    if (atomic_load_explicit(&ctx->bytes_pending, memory_order_relaxed)
+            >= limit)
+        return; /* trainer hasn’t processed yet     */
+
+    /* ---- allocate sample node -------------------------------------- */
+    sample_node_t *node = malloc(sizeof(sample_node_t));
+    if (!node)
+        return;
+    node->buf = malloc(len);
+    if (!node->buf) {
+        free(node);
+        return;
+    }
+    memcpy(node->buf, src, len);
+    node->len = len;
+
+    /* ---- lock-free push into MPSC list ------------------------------ */
+    sample_node_t *old_head;
+    do {
+        old_head = atomic_load_explicit(&ctx->samples_head,
+                memory_order_acquire);
+        node->next = old_head;
+    } while (!atomic_compare_exchange_weak_explicit(&ctx->samples_head,
+            &old_head, node, memory_order_release, memory_order_relaxed));
+
+    atomic_fetch_add_explicit(&ctx->bytes_pending, len, memory_order_relaxed);
+    /* update statistics for "default" namespace*/
+    mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_ns("default", 7);
+    if(stats) {
+        atomic_inc64(&stats->reservoir_bytes, len);
+        atomic_inc64(&stats->reservoir_items, 1);
+    }
+}
+
+void mcdc_sample(const void *key, size_t klen, const void* value, size_t vlen) {
+    sample_for_training(key, klen, value, vlen);
+    mcdc_sampler_maybe_record(key, klen, value, vlen);
+}
+
+
+static inline const ZSTD_DDict*
+get_ddict_by_id(uint16_t id)
+{
+    const mcdc_table_t *table = mcdc_current_table();
+    if(!table) return NULL;
+    const mcdc_dict_meta_t *meta = mcdc_lookup_by_id(table, id);
+    if(!meta) return NULL;
+    return meta->ddict;
+}
+
+static inline const mcdc_dict_meta_t *
+get_meta_by_key(const char *key, size_t klen) {
+    const mcdc_table_t *table = mcdc_current_table();
+    if(!table) return NULL;
+    const mcdc_dict_meta_t *meta = mcdc_pick_dict(table, key, klen);
+    return meta;
+}
+
+ssize_t inline mcdc_orig_size(const void *src, size_t comp_size){
+    return ZSTD_getFrameContentSize(src, comp_size);
+}
+
+static inline unsigned long long cur_tid(void) {
+    return (unsigned long long)(uintptr_t)pthread_self();
+}
+
+/*
+ * Find namespace for a key.
+ *
+ * key      : pointer to key bytes
+ * klen     : length of the key
+ * nspaces  : number of namespace strings
+ * spaces   : array of namespace strings (prefixes)
+ *
+ * Returns: pointer to namespace string (from spaces[]) or NULL if no match.
+ */
+const char *
+mcdc_match_namespace(const char *key, size_t klen,
+                    const char **spaces, size_t nspaces)
+{
+    if (!key || !spaces) return NULL;
+
+    const char *best = NULL;
+    size_t best_len = 0;
+
+    for (size_t i = 0; i < nspaces; i++) {
+        const char *ns = spaces[i];
+        if (!ns) continue;
+
+        size_t nlen = strlen(ns);
+        if (nlen > klen) continue;  // can't match, key shorter than prefix
+
+        if (memcmp(key, ns, nlen) == 0) {
+            // longest-match wins
+            if (nlen > best_len) {
+                best = ns;
+                best_len = nlen;
+            }
+        }
+    }
+    return best;
+}
+
+bool mcdc_dict_exists(uint16_t id) {
+    const mcdc_table_t *table = mcdc_current_table();
+    if(!table) return NULL;
+    const mcdc_dict_meta_t *meta = mcdc_lookup_by_id(table, id);
+    return meta? true: false;
+}
+
+void mcdc_report_dict_miss_err(const char *key, size_t klen) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();          /* global-static instance */
+    if (!ctx->cfg->enable_comp){
+        return;
+    }
+    mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_key((const char *) key, klen);
+    if(stats) {
+        atomic_inc64(&stats->dict_miss_errs, 1);
+    }
+}
+
+void mcdc_report_decomp_err(const char *key, size_t klen) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();          /* global-static instance */
+    if (!ctx->cfg->enable_comp){
+        return;
+    }
+    mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_key((const char *) key, klen);
+    if(stats) {
+        atomic_inc64(&stats->decompress_errs, 1);
+    }
+}
+
+/* -----------------------------------------------------------------
+ * Compress an value.
+ *  • On success: returns compressed size (≥0) and sets *dict_id_out.
+ *  • On error  : returns negative errno / ZSTD error; *dict_id_out == 0.
+ * ----------------------------------------------------------------*/
+ssize_t mcdc_maybe_compress(const void *src, size_t src_sz, const void *key, size_t key_sz,
+                    void **dst, uint16_t *dict_id_out)
+{
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    if (!ctx->cfg->enable_comp){
+        return 0;
+    }
+    /* 0.  sanity checks ------------------------------------------ */
+    if (!ctx || !src || src_sz == 0 || !dst || !dict_id_out)
+        return -EINVAL;
+    /* Statistics */
+    mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_key((const char *) key, key_sz);
+    atomic_inc64(&stats->writes_total, 1);
+    atomic_inc64(&stats->bytes_raw_total, src_sz);
+
+    if (ctx->cfg->min_comp_size && src_sz < ctx->cfg->min_comp_size){
+        atomic_inc64(&stats->skipped_comp_min_size, 1);
+        return 0;
+    }
+    if (ctx->cfg->max_comp_size && src_sz > ctx->cfg->max_comp_size) {
+        atomic_inc64(&stats->skipped_comp_max_size, 1);
+        return 0;                              /* bypass */
+    }
+
+    /* 1.  choose dictionary -------------------------------------- */
+    const mcdc_dict_meta_t *meta = get_meta_by_key(key, key_sz);
+    const ZSTD_CDict *cd = meta? meta->cdict: NULL;
+    uint16_t did = meta? meta->id:0;
+
+    /* 2.  prepare TLS scratch ------------------------------------ */
+    size_t bound = ZSTD_compressBound(src_sz);
+    tls_ensure(bound);                         /* ensure scratch ≥ bound */
+    void *dst_buf = tls.scratch;
+    
+    CHECK_Z(ZSTD_CCtx_refCDict(tls.cctx, cd));
+
+    /* 3.  compress ----------------------------------------------- */
+    size_t csz = ZSTD_compress2(tls.cctx, dst_buf, bound, src, src_sz);
+    if (ZSTD_isError(csz)) {
+        atomic_inc64(&stats->compress_errs, 1);
+        return -1;
+    }
+    /* 4. report 'eff' statistics - only for "default" namespace*/
+    int rc;
+    bool res;
+    rc = mcdc_stats_is_default(stats, &res);
+    if(rc == 0 && res) {
+        mcdc_eff_on_observation(src_sz, csz);
+    }
+    /* 5.  ratio check – skip if no benefit ----------------------- */
+    if (csz >= src_sz) {
+        atomic_inc64(&stats->skipped_comp_incomp, 1);
+        return 0;
+    }
+    atomic_inc64(&stats->bytes_cmp_total, csz);
+
+    /* 6.  success ------------------------------------------------ */
+    *dst         = dst_buf;          /* valid until same thread calls tls_ensure() again */
+    *dict_id_out = did;              /* 0 = no dictionary             */
+    return (ssize_t)csz;
+}
+/* ------------------------------------------------------------------ */
+/* Decompress a value into an iovec array.                             *
+ *  - src/src_sz : compressed buffer                                   *
+ *  - dst/dst_cnt: scatter-gather destination                          *
+ *  - dict_id    : 0 = no dict, ≥1 = dictionary selector               *
+ * Returns:                                                            *
+ *    ≥0  decompressed bytes                                           *
+ *   < 0  negative errno / ZSTD error code                             */
+/* ------------------------------------------------------------------ */
+ssize_t mcdc_decompress(const void *src,
+        size_t src_sz, void *dst, size_t dst_sz, uint16_t dict_id) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    /* 0) sanity checks ----------------------------------------------- */
+    if (!ctx || !src || src_sz == 0 || !dst || dst_sz <= 0)
+        return -EINVAL; /* invalid arguments */
+    /* 1) compute output capacity ---------------------------------- */
+    /* 2) pick decompression path ---------------------------------- */
+    /* We call this function to init TLS contexts */
+    tls_ensure(0);
+    size_t out_sz;
+    if (dict_id == 0) {
+        out_sz = ZSTD_decompressDCtx(tls.dctx, dst, dst_sz, src,
+                src_sz);
+    } else {
+        const ZSTD_DDict *dict = get_ddict_by_id(dict_id);
+        if (!dict)
+            return -EINVAL; /* unknown dictionary ID     */
+
+        out_sz = ZSTD_decompress_usingDDict(tls.dctx, dst, dst_sz, src,
+                src_sz, dict);
+    }
+
+    if (ZSTD_isError(out_sz))
+        return -1;   /* correct sign */
+
+    if (out_sz > dst_sz)
+        return -EOVERFLOW;                            /* caller too small */
+
+    return (ssize_t) out_sz;
+}
+
+/* Return values
+ *   >0  : decompressed length
+ *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
+ *   <0  : negative errno / ZSTD error code
+ */
+ssize_t mcdc_maybe_decompress(const char *value,
+                             size_t value_sz, const char *key, size_t key_sz, void **out, uint16_t did) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+
+    /* 1. Statistics */
+    mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_key(key, key_sz);
+    if(stats) atomic_inc64(&stats->reads_total, 1);
+
+    /* 2. Dictionary lookup --------------------------------------- */
+    const ZSTD_DDict *dd = get_ddict_by_id(did);
+    if (!dd && did > 0){
+        if(ctx->cfg->verbose > 0)
+            fprintf(stderr, "[mcz] decompress: unknown dict id %u\n", did);
+        if(stats) atomic_inc64(&stats->dict_miss_errs, 1);
+        //TODO: item must be deleted upstream
+        return -EINVAL;                  /* unknown dict id */
+    }
+
+    /* 3. Prepare destination buffer ------------------------------ */
+    size_t expect = ZSTD_getFrameContentSize(value, value_sz);
+    if (expect == ZSTD_CONTENTSIZE_ERROR){
+        if(ctx->cfg->verbose > 0)
+            fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu)\n",
+               cur_tid(), did, value_sz);
+        if(stats) atomic_inc64(&stats->decompress_errs, 1);
+        return -EINVAL;
+    }
+    if (expect == ZSTD_CONTENTSIZE_UNKNOWN)
+        expect = value_sz * 4u;           /* pessimistic */
+
+    void *dst = malloc(expect);
+    if (!dst){
+        if(ctx->cfg->verbose > 0)
+            fprintf(stderr,"[mcz] decompress: malloc(%zu) failed: %s\n",
+                expect, strerror(errno));
+        if(stats) atomic_inc64(&stats->decompress_errs, 1);
+
+        return -ENOMEM;
+    }
+
+    /* 4. Decompress ---------------------------------------------- */
+    ssize_t dec = mcdc_decompress(value, value_sz, dst, expect, did);
+
+    if (dec < 0) {
+        if(ctx->cfg->verbose > 0)
+        /* ZSTD error */
+            fprintf(stderr, "[mcz decompress: mcdc_decompress() -> %zd (id=%u)\n",
+                dec, did);
+        free(dst);
+        if(stats) atomic_inc64(&stats->decompress_errs, 1);
+        return dec;
+    }
+    *out = dst;
+    return dec;                          /* decompressed bytes */
+}
+
+
+/* ---- Publish / current (copy-on-write) ---- */
+
+static void mcdc_publish_table(mcdc_table_t *tab) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+
+    /* bump generation from current */
+    mcdc_table_t *old = (mcdc_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+    tab->gen = old ? (old->gen + 1) : 1;
+    atomic_store_explicit(&ctx->dict_table, (uintptr_t)tab, memory_order_release);
+    /* enqueue retired table to GC*/
+    if (old) mcdc_gc_enqueue_retired(ctx, old);
+}
+
+/* ---- Coordinated reload (no pause-the-world) ---- */
+mcdc_reload_status_t *mcdc_reload_dictionaries(void)
+{
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    if (!ctx->cfg->enable_dict) return NULL;
+    const char *dir = ctx->cfg->dict_dir;
+    char *err = NULL;
+    mcdc_reload_status_t *st = calloc(1, sizeof(*st));
+
+    mcdc_table_t *newtab = mcdc_scan_dict_dir(dir, ctx->cfg->dict_retain_max,
+                                         ctx->cfg->gc_quarantine_period, ctx->cfg->zstd_level, &err);
+    if (err != NULL){
+        fprintf(stderr, "reload dictionaries failed: %s\n", err ? err : "unknown error");
+        st->rc = -ENOENT;
+        snprintf(st->err, sizeof(st->err), "reload dictionaries failed: %s\n", err ? err : "unknown error");
+        free(err);
+        if (!newtab) return st;
+    }
+    mcdc_table_t *oldtab = (mcdc_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+    mcdc_publish_table(newtab);
+    build_reload_status(newtab, oldtab, st);
+    if(ctx->cfg->verbose > 1) {
+        reload_status_dump(st);
+    }
+    return st;
+}
+
+static inline int is_default_ns(const char *ns, size_t ns_sz) {
+    static const char defname[] = "default";
+    size_t def_sz = sizeof(defname) - 1;
+    return (ns && ns_sz == def_sz && memcmp(ns, defname, def_sz) == 0);
+}
+
+/* Fill per-namespace metadata; only if ns == "default" add ewma/baseline/etc */
+static int
+prefill_stats_snapshot_ns(mcdc_stats_snapshot_t *snapshot, const char *ns, size_t ns_sz)
+{
+    if (!snapshot || !ns) return -EINVAL;
+
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    if (!ctx) return -EFAULT;
+    bool is_default = is_default_ns(ns, ns_sz);
+    mcdc_table_t *tab = (mcdc_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+    if (!tab && !is_default) return -ENOENT;
+
+    /* dict meta for this ns (including "default") */
+    const mcdc_dict_meta_t *meta = mcdc_pick_dict(tab, ns, ns_sz);
+    if (!meta && !is_default) return -ENOENT;
+
+    if (tab && meta){
+        snapshot->dict_id   = meta->id;
+        snapshot->dict_size = meta->dict_size;
+
+        /* total dicts configured for this ns */
+        {
+            int found = 0;
+            for (size_t i = 0; i < tab->nspaces; i++) {
+                mcdc_ns_entry_t *sp = tab->spaces[i];
+                if (!sp || !sp->ndicts || !sp->prefix) continue;
+
+                size_t plen = strlen(sp->prefix);
+                if (plen == ns_sz && memcmp(ns, sp->prefix, plen) == 0) {
+                    snapshot->total_dicts = sp->ndicts;
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) return -ENOENT;
+        }
+    }
+
+    /* Only for the "default" namespace, add efficiency + mode */
+    if (is_default) {
+        snapshot->ewma_m          = mcdc_eff_get_ewma();
+        snapshot->baseline        = mcdc_eff_get_baseline();
+        snapshot->last_retrain_ms = mcdc_eff_last_train_seconds() * 1000; /* seconds; field name kept */
+        snapshot->train_mode      = (uint32_t)ctx->cfg->train_mode;
+    }
+
+    return 0;
+}
+
+
+/* If ns == NULL → GLOBAL stats (overall); do NOT fill ewma/baseline/last_train/train_mode here.
+   If ns != NULL → namespace stats; fill the four fields only when ns == "default". */
+int
+mcdc_get_stats_snapshot(mcdc_stats_snapshot_t *snap, const char *ns, size_t ns_sz)
+{
+    if (!snap) return -EINVAL;
+    memset(snap, 0, sizeof(*snap));
+
+    if (ns == NULL) {
+        /* GLOBAL (overall) */
+        mcdc_stats_atomic_t *g = mcdc_stats_global();
+        if (!g) return -ENOENT;
+        mcdc_stats_snapshot_fill(g, snap);
+        return 0;
+    }
+
+    /* Per-namespace (including "default") */
+    {
+        int rc = prefill_stats_snapshot_ns(snap, ns, ns_sz);
+        if (rc < 0) return rc;
+
+        mcdc_stats_atomic_t *st = mcdc_stats_lookup_by_ns(ns, ns_sz);
+        if (!st) return -ENOENT;
+
+        mcdc_stats_snapshot_fill(st, snap);
+        return 0;
+    }
+}
+
+const char **mcdc_list_namespaces(size_t *count){
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    if (!ctx) return NULL;
+
+    mcdc_table_t *table = (mcdc_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+    if (!table || table->nspaces == 0) {
+        if (count) *count = 0;
+        return NULL;
+    }
+    /* Build temporary view into existing prefixes */
+    const char **list = malloc(table->nspaces * sizeof(char *));
+    if (!list) {
+        if (count) *count = 0;
+        return NULL;
+    }
+    char * def_name = "default";
+    size_t out = 0;
+    for (size_t i = 0; i < table->nspaces; i++) {
+        mcdc_ns_entry_t *ns = table->spaces[i];
+        if (ns && !strcmp(ns->prefix, def_name)){
+            continue;
+        }
+        list[out++] = ns ? strdup(ns->prefix) : "";
+    }
+    if (count) *count = out;
+
+    return list;
+
+}
+

@@ -1,0 +1,136 @@
+/*
+ * Copyright (c) 2025 Vladimir Rodionov
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef MCDC_CONFIG
+#define MCDC_CONFIG
+
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include "redismodule.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* --------------------------------------------------------------------
+ * User-tunable parameters for the zstd integration
+ * (keep in sync with mcdc_compression.h)
+ * ------------------------------------------------------------------ */
+
+typedef enum {
+    MCDC_TRAIN_FAST = 0,
+    MCDC_TRAIN_OPTIMIZE = 1,
+} mcdc_train_mode_t;
+
+typedef struct {
+    // Core
+    bool     enable_comp;           // default true
+    bool     enable_dict;           // default true
+    char    *dict_dir;              // dictionary directorypath
+    size_t   dict_size;             // bytes (target dict size)
+    int      zstd_level;            // compression level (1-22) default: 3
+    size_t   min_comp_size;         // compress if >=
+    size_t   max_comp_size;         // compress if <=
+    bool     compress_keys;         // compress key (false, not implemented yet)
+
+    // Training
+    bool     enable_training;       // enable online training
+    int64_t  retraining_interval_s; // minimum interval between retarining attempts inseconds
+    size_t   min_training_size;     // bytes of eligible data since last train
+    double   ewma_alpha;            // 0..1 (alpha in EWMA)
+    double   retrain_drop;          // 0..1 drop  in compression efficency to trigger retraining
+    mcdc_train_mode_t train_mode;    // FAST (default) or OPTIMIZE (slower, sometimes can give some improvement)
+
+    // GC
+    int32_t gc_cool_period;         // default, 1h - time to keep retired dictionary data in memory
+    int32_t gc_quarantine_period;   // default: 7d, time to keep retired dictionary in a file system
+    // Retention
+    int      dict_retain_max;       // cap count of resident old dicts per namespace
+
+    // Sampling + Spool
+    bool     enable_sampling;       // enable sample spooling
+    double   sample_p;              // 0..1
+    int      sample_window_duration;// maximum duration of a sampling in seconds
+    char    *spool_dir;             // path to the spool directory
+    size_t   spool_max_bytes;       // cap bytes to collect
+    int verbose;                    // logging level, default - 0 (minimum), its memcached style
+} mcdc_cfg_t;
+
+
+/* Default config values for MC/DC */
+
+#define MCDC_DEFAULT_ENABLE_COMP            true
+#define MCDC_DEFAULT_ENABLE_DICT            true
+#define MCDC_DEFAULT_DICT_DIR               NULL
+#define MCDC_DEFAULT_DICT_SIZE              (256 * 1024)
+#define MCDC_DEFAULT_ZSTD_LEVEL             3
+#define MCDC_DEFAULT_MIN_COMP_SIZE          32
+#define MCDC_DEFAULT_MAX_COMP_SIZE          (100 * 1024)
+
+#define MCDC_DEFAULT_ENABLE_TRAINING        true
+#define MCDC_DEFAULT_RETRAIN_INTERVAL_S     (2 * 60 * 60)
+#define MCDC_DEFAULT_MIN_TRAINING_SIZE      0
+#define MCDC_DEFAULT_EWMA_ALPHA             0.05
+#define MCDC_DEFAULT_RETRAIN_DROP           0.1
+#define MCDC_DEFAULT_TRAIN_MODE             MCDC_TRAIN_FAST
+
+#define MCDC_DEFAULT_GC_COOL_PERIOD         3600
+#define MCDC_DEFAULT_GC_QUARANTINE_PERIOD   (3600 * 24 * 7)
+
+#define MCDC_DEFAULT_DICT_RETAIN_MAX        10
+
+#define MCDC_DEFAULT_ENABLE_SAMPLING        true
+#define MCDC_DEFAULT_SAMPLE_P               0.02
+#define MCDC_DEFAULT_SAMPLE_WINDOW_DURATION 0
+#define MCDC_DEFAULT_SPOOL_DIR              NULL
+#define MCDC_DEFAULT_SPOOL_MAX_BYTES        (64 * 1024 * 1024)
+
+#define MCDC_DEFAULT_COMPRESS_KEYS          false
+#define MCDC_DEFAULT_VERBOSE                0
+
+/* --------------------------------------------------------------------
+ * parse_mcdc_config()
+ *
+ *  - Reads an INI-style file (key = value, “#” comments).
+ *  - Recognised keys: level, max_dict, min_train_size,
+ *    min_comp_size, max_comp_size, compress_keys, dict_dir_path.
+ *  - Size values accept K/M/G suffixes (case-insensitive).
+ *  - Populates / overrides fields in *cfg.
+ *
+ * Returns:
+ *      0          on success
+ *     -errno      on I/O failure (-ENOENT, -EACCES, …)
+ *     -EINVAL     on syntax error
+ *-------------------------------------------------------------------*/
+int parse_mcdc_config(const char *path);
+
+void mcdc_config_print(const mcdc_cfg_t *cfg);
+
+mcdc_cfg_t * mcdc_config_get(void);
+
+void mcdc_init_default_config(void);
+
+int mcdc_config_sanity_check(void);
+
+/* Extract cfg=/path and call parse_mcdc_config() */
+int MCDC_LoadConfig(RedisModuleCtx *ctx, RedisModuleString **argv, int argc);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* MCDC_CONFIG_H */
