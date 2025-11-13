@@ -15,16 +15,26 @@
  */
 
 #pragma once
-#include "memcached.h"     /* conn, out_string, write_* */
-#include "proto_text.h"
-#include "protocol_binary.h"  /* for protocol headers */
-
+#include "redismodule.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Ascii handler */
-void process_mcdc_command_ascii(conn *c, token_t *tokens, const size_t ntokens);
+int MCDC_ConfigCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc);
+int MCDC_NSCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                   int argc);
+int MCDC_StatsCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                      int argc);
+int MCDC_SamplerCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                        int argc);
+int MCDC_ReloadCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc);
 
 #ifdef __cplusplus
 }

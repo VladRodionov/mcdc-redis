@@ -6,11 +6,8 @@
 #include "redismodule.h"
 #include "mcdc_module.h"
 #include "mcdc_compression.h"
+#include "mcdc_admin_cmd.h"
 
-/* Forward declarations */
-int MCDC_PingCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc);
-
-int MCDC_Version(RedisModuleCtx *ctx, RedisModuleString **argv, int argc);
 
 static void MCDC_LogCwd(RedisModuleCtx *ctx) {
     char cwd[PATH_MAX];
@@ -31,24 +28,31 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         return REDISMODULE_ERR;
     }
 
-    /* Future: parse argv for initial config (dict file, namespaces, etc.) */
-
-    if (RedisModule_CreateCommand(ctx, "mcdc.ping", MCDC_PingCommand, "fast", 0, 0, 0)
+    if (RedisModule_CreateCommand(ctx, "mcdc.stats", MCDC_StatsCommand, "fast", 0, 0, 0)
         == REDISMODULE_ERR) {
         return REDISMODULE_ERR;
     }
 
-    if (RedisModule_CreateCommand(ctx, "mcdc.version", MCDC_Version, "fast", 0, 0, 0)
+    if (RedisModule_CreateCommand(ctx, "mcdc.config", MCDC_ConfigCommand, "fast", 0, 0, 0)
         == REDISMODULE_ERR) {
     	return REDISMODULE_ERR;
     }
 
-    /* TODO: Register other commands:
-       mcdc.stats <namespace> json
-       mcdc.reload
-       mcdc.config json
-       mcdc.ns ...
-    */
+    if (RedisModule_CreateCommand(ctx, "mcdc.sampler", MCDC_SamplerCommand, "fast", 0, 0, 0)
+        == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "mcdc.reload", MCDC_ReloadCommand, "fast", 0, 0, 0)
+        == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "mcdc.ns", MCDC_NSCommand, "fast", 0, 0, 0)
+        == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
     /* Load and parse config directly */
     if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)
          return REDISMODULE_ERR;
@@ -64,18 +68,3 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     return REDISMODULE_OK;
 }
 
-int MCDC_PingCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    REDISMODULE_NOT_USED(argv);
-    if (argc != 1) {
-        return RedisModule_WrongArity(ctx);
-    }
-    return RedisModule_ReplyWithSimpleString(ctx, "PONG");
-}
-
-int MCDC_Version(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    REDISMODULE_NOT_USED(argv); REDISMODULE_NOT_USED(argc);
-    char buf[32];
-    RedisModule_ReplyWithSimpleString(ctx,
-        (snprintf(buf,sizeof(buf),"%d.%d.%d", MCDC_VER_MAJOR, MCDC_VER_MINOR, MCDC_VER_PATCH), buf));
-    return REDISMODULE_OK;
-}

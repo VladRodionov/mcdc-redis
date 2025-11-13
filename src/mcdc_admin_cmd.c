@@ -51,15 +51,10 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 
-#include "mcdc_cmd.h"
+#include "mcdc_admin_cmd.h"
+#include "mcdc_compression.h"
 #include "mcdc_config.h"
-
 #include "mcdc_sampling.h"
-#include "proto_bin.h"
-
-#define COMMAND_TOKEN 0
-#define SUBCOMMAND_TOKEN 1
-
 
 /* Map train mode to string */
 static const char *train_mode_str(mcdc_train_mode_t m) {
@@ -76,12 +71,11 @@ static inline const char *b2s(bool v) { return v ? "true" : "false"; }
 /* ---------- mcdc sampler status ---------- */
 static int sampler_status_ascii(char *buf, size_t cap, mcdc_sampler_status_t *st) {
     int n = snprintf(buf, cap,
-        "MCDC-SAMPLER configured %s\r\n"
-        "MCDC-SAMPLER running %s\r\n"
-        "MCDC-SAMPLER bytes_written %" PRIu64 "\r\n"
-        "MCDC-SAMPLER bytes_collected %" PRIu64 ",\r\n"
-        "MCDC-SAMPLER path %s\r\n"
-        "END\r\n",
+        "configured: %s\r\n"
+        "running: %s\r\n"
+        "bytes_written: %" PRIu64 "\r\n"
+        "bytes_collected: %" PRIu64 ",\r\n"
+        "path: %s",
         st->configured ? "true" : "false",
         st->running    ? "true" : "false",
         (uint64_t)st->bytes_written,
@@ -99,7 +93,7 @@ static int sampler_status_json(char *buf, size_t cap, mcdc_sampler_status_t *st)
           "\"bytes_written\": %" PRIu64 ",\r\n"
           "\"queue_collected\": %" PRIu64 ",\r\n"
           "\"path\": \"%s\"\r\n"
-        "}\r\n",
+        "}",
         st->configured ? "true" : "false",
         st->running    ? "true" : "false",
         (uint64_t)st->bytes_written,
@@ -109,7 +103,7 @@ static int sampler_status_json(char *buf, size_t cap, mcdc_sampler_status_t *st)
     return n;
 }
 
-static int build_sampler_status(char **outp, size_t *lenp, int json) {
+int build_sampler_status(char **outp, size_t *lenp, int json) {
     mcdc_sampler_status_t st;
     mcdc_sampler_get_status(&st);
     size_t cap = 2048;
@@ -123,62 +117,87 @@ static int build_sampler_status(char **outp, size_t *lenp, int json) {
         char *nb = (char*)realloc(buf, cap);
         if (!nb) { free(buf); return -1; }
         buf = nb;
-        int n = json? sampler_status_json(buf, cap, &st): sampler_status_ascii(buf, cap, &st);
+        n = json? sampler_status_json(buf, cap, &st): sampler_status_ascii(buf, cap, &st);
         if (n < 0) { free(buf); return -1; }
     }
     *outp = buf; *lenp = (size_t)n;
     return 0;
 }
 
-/* ---------- ASCII: mcdc sampler ... ---------- */
-static void handle_mcdc_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
-    if (ntokens < 4 || ntokens > 5) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
-    const char *verb = tokens[COMMAND_TOKEN + 2].value;
+int MCDC_SamplerCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc)
+{
+    RedisModule_AutoMemory(ctx);
+    if (argc < 2 || argc > 3) {
+        return RedisModule_ReplyWithError(
+                ctx, "ERR usage: mcdc.sampler <start|stop|status> [json]");
+    }
+    int want_json = 0;
+    /* Argument parsing */
+    if (argc == 3) {
+        size_t len;
+        const char *arg = RedisModule_StringPtrLen(argv[2], &len);
 
-    if (strcmp(verb, "start") == 0) {
-        if (ntokens != 4) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
+        if (len == 4 && strncasecmp(arg, "json", 4) == 0) {
+            want_json = 1;
+        } else {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR unknown argument (only 'json' is supported)");
+        }
+    }
+    size_t len;
+    const char *arg = RedisModule_StringPtrLen(argv[1], &len);
+    if (strncasecmp(arg, "start", 5) == 0) {
         int rc = mcdc_sampler_start();
         if (rc == 0) {
-            out_string(c, "STARTED\r\n");
+            return RedisModule_ReplyWithSimpleString(
+                    ctx, "STARTED");
         } else if (rc == 1) {
-            out_string(c, "RUNNING\r\n");
+            return RedisModule_ReplyWithSimpleString(
+                    ctx, "RUNNING");
         } else {
             char tmp[64];
-            snprintf(tmp, sizeof(tmp), "SERVER_ERROR sampler_start rc=%d", rc);
-            out_string(c, tmp);
+            snprintf(tmp, sizeof(tmp), "ERR mcdc.sampler start rc=%d", rc);
+            return RedisModule_ReplyWithError(ctx, tmp);
         }
-        return;
-    } else if (strcmp(verb, "stop") == 0) {
-        if (ntokens != 4) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
-
+    } else if (strncasecmp(arg, "stop", 4) == 0) {
         int rc = mcdc_sampler_stop();
         if (rc == 0) {
-            out_string(c, "STOPPED\r\n");
+            return RedisModule_ReplyWithSimpleString(
+                    ctx, "STOPPED");
         } else if (rc == 1) {
-            out_string(c, "NOT RUNNING\r\n");
+            return RedisModule_ReplyWithSimpleString(
+                    ctx, "NOT RUNNING");
         } else {
             char tmp[64];
-            snprintf(tmp, sizeof(tmp), "SERVER_ERROR sampler_stop rc=%d", rc);
-            out_string(c, tmp);
+            snprintf(tmp, sizeof(tmp), "ERR mcdc.sampler stop rc=%d", rc);
+            return RedisModule_ReplyWithError(ctx, tmp);
         }
-        return;
-    } else if (strcmp(verb, "status") == 0) {
-        int want_json = 0;
-        if (ntokens == 5 && tokens[COMMAND_TOKEN + 3].value &&
-            strcmp(tokens[COMMAND_TOKEN + 3].value, "json") == 0) {
-            want_json = 1;
-        } else if (ntokens == 5){
-            out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]");
-            return;
-        }
-        char *payload = NULL; size_t plen = 0;
-        int rc = build_sampler_status(&payload, &plen, want_json);
-        if (rc != 0 || !payload) { out_string(c, "SERVER_ERROR sampler_status"); return; }
-        write_and_free(c, payload, plen);
-        return;
+    } else if (strncasecmp(arg, "status", 5) == 0) {
+        char *payload = NULL;
+        size_t plen = 0;
+        int rc =   build_sampler_status(&payload, &plen, want_json);
+        if (rc != 0 || payload == NULL) {
+            if (payload) {
+                free(payload);
+                payload = NULL;
+            }
+            if (rc == -ENOMEM) {
+                return RedisModule_ReplyWithError(
+                    ctx, "ERR MCDC sampler: memory allocation failed");
+            }
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC sampler: serialization failed");
+        }        /* Reply with simple string using the generated payload */
+        RedisModule_ReplyWithStringBuffer(ctx, payload, plen);
+        /* Cleanup your allocated payload */
+        free(payload);
+        return REDISMODULE_OK;
+    } else {
+        return RedisModule_ReplyWithError(
+                ctx, "ERR usage: mcdc.sampler <start|stop|status> [json]");
     }
-
-    out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]");
 }
 
 /* ----------  mcdc reload ... ------------*/
@@ -187,36 +206,33 @@ static int reload_status_ascii(char *buf, size_t cap, mcdc_reload_status_t *st) 
     int n;
     if (st->rc == 0) {
         n = snprintf(buf, cap,
-            "MCDC-RELOAD status OK\r\n"
-            "MCDC-RELOAD ns %u\r\n"
-            "MCDC-RELOAD dicts_loaded %u\r\n"
-            "MCDC-RELOAD dicts_new %u\r\n"
-            "MCDC-RELOAD dicts_reused %u\r\n"
-            "MCDC-RELOAD dicts_failed %u\r\n"
-            "END\r\n",
+            "status: OK\r\n"
+            "ns: %u\r\n"
+            "dicts_loaded: %u\r\n"
+            "dicts_new: %u\r\n"
+            "dicts_reused: %u\r\n"
+            "dicts_failed: %u",
             st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
     } else if (st->err[0]) {
         n = snprintf(buf, cap,
-            "MCDC-RELOAD status ERR\r\n"
-            "MCDC-RELOAD rc %d\r\n"
-            "MCDC-RELOAD msg %s\r\n"
-            "MCDC-RELOAD ns %u\r\n"
-            "MCDC-RELOAD dicts_loaded %u\r\n"
-            "MCDC-RELOAD dicts_new %u\r\n"
-            "MCDC-RELOAD dicts_reused %u\r\n"
-            "MCDC-RELOAD dicts_failed %u\r\n"
-            "END\r\n",
+            "status: ERR\r\n"
+            "rc: %d\r\n"
+            "msg: %s\r\n"
+            "ns: %u\r\n"
+            "dicts_loaded: %u\r\n"
+            "dicts_new: %u\r\n"
+            "dicts_reused: %u\r\n"
+            "dicts_failed: %u",
             st->rc, st->err, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
     } else {
         n = snprintf(buf, cap,
-            "MCDC-RELOAD status ERR\r\n"
-            "MCDC-RELOAD rc %d\r\n"
-            "MCDC-RELOAD ns %u\r\n"
-            "MCDC-RELOAD dicts_loaded %u\r\n"
-            "MCDC-RELOAD dicts_new %u\r\n"
-            "MCDC-RELOAD dicts_reused %u\r\n"
-            "MCDC-MCDC-RELOAD dicts_failed %u\r\n"
-            "END\r\n",
+            "status: ERR\r\n"
+            "rc: %d\r\n"
+            "ns: %u\r\n"
+            "dicts_loaded: %u\r\n"
+            "dicts_new: %u\r\n"
+            "dicts_reused: %u\r\n"
+            "dicts_failed: %u",
             st->rc, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
     }
     return n;
@@ -233,7 +249,7 @@ static int reload_status_json(char *buf, size_t cap, mcdc_reload_status_t *st) {
             "\"dicts_new\": %u,\r\n"
             "\"dicts_reused\": %u,\r\n"
             "\"dicts_failed\": %u\r\n"
-            "}\r\n",
+            "}",
             st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
     } else if (st->err[0]) {
         n = snprintf(buf, cap,
@@ -246,7 +262,7 @@ static int reload_status_json(char *buf, size_t cap, mcdc_reload_status_t *st) {
             "\"dicts_new\": %u,\r\n"
             "\"dicts_reused\": %u,\r\n"
             "\"dicts_failed\": %u\r\n"
-            "}\r\n",
+            "}",
             st->rc, st->err, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
     } else {
         n = snprintf(buf, cap,
@@ -258,13 +274,13 @@ static int reload_status_json(char *buf, size_t cap, mcdc_reload_status_t *st) {
             "\"dicts_new\": %u,\r\n"
             "\"dicts_reused\": %u,\r\n"
             "\"dicts_failed\": %u\r\n"
-            "}\r\n",
+            "}",
             st->rc, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
     }
     return n;
 }
 
-static int build_reload_status(char **outp, size_t *lenp, int json) {
+int build_reload_status(char **outp, size_t *lenp, int json) {
 
     mcdc_reload_status_t *st = mcdc_reload_dictionaries();
     if (!st) {
@@ -289,6 +305,52 @@ static int build_reload_status(char **outp, size_t *lenp, int json) {
     return 0;
 }
 
+/* mcdc.reload [json] */
+int MCDC_ReloadCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc)
+{
+    RedisModule_AutoMemory(ctx);
+    int want_json = 0;
+    /* Argument parsing */
+    if (argc == 2) {
+        size_t len;
+        const char *arg = RedisModule_StringPtrLen(argv[1], &len);
+
+        if (len == 4 && strncasecmp(arg, "json", 4) == 0) {
+            want_json = 1;
+        } else {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR unknown argument (only 'json' is supported)");
+        }
+    } else if (argc > 2) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR wrong number of arguments");
+    }
+    /* Call your existing config builder */
+    char *payload = NULL;
+    size_t plen = 0;
+    int rc =  build_reload_status(&payload, &plen, want_json);
+    if (rc != 0 || payload == NULL) {
+        if (payload) {
+            free(payload);
+            payload = NULL;
+        }
+        if (rc == -ENOMEM) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC reload: memory allocation failed");
+        }
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC relaod: serialization failed");
+    }
+    /* Reply with simple string using the generated payload */
+    RedisModule_ReplyWithStringBuffer(ctx, payload, plen);
+    /* Cleanup your allocated payload */
+    free(payload);
+    return REDISMODULE_OK;
+}
+
+
 /* ----------  mcdc config ... ------------*/
 static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
     if (!c) return -1;
@@ -297,29 +359,28 @@ static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
     const char *spool_dir= c->spool_dir ? c->spool_dir : "";
 
     int n = snprintf(buf, cap,
-            "MCDC-CFG enable_comp %s\r\n"
-            "MCDC-CFG enable_dict %s\r\n"
-            "MCDC-CFG dict_dir %s\r\n"
-            "MCDC-CFG dict_size %zu \r\n"
-            "MCDC-CFG zstd_level %d \r\n"
-            "MCDC-CFG min_comp_size %zu \r\n"
-            "MCDC-CFG max_comp_size %zu \r\n"
-            "MCDC-CFG compress_keys %s \r\n"
-            "MCDC-CFG enable_training %s \r\n"
-            "MCDC-CFG retraining_interval_s %" PRId64 "\r\n"
-            "MCDC-CFG min_training_size %zu \r\n"
-            "MCDC-CFG ewma_alpha %.6f\r\n"
-            "MCDC-CFG retrain_drop %.6f\r\n"
-            "MCDC-CFG train_mode %s\r\n"
-            "MCDC-CFG gc_cool_period %d\r\n"
-            "MCDC-CFG gc_quarantine_period %d\r\n"
-            "MCDC-CFG dict_retain_max %d\r\n"
-            "MCDC-CFG enable_sampling %s\r\n"
-            "MCDC-CFG sample_p %.6f\r\n"
-            "MCDC-CFG sample_window_duration %d\r\n"
-            "MCDC-CFG spool_dir %s\r\n"
-            "MCDC-CFG spool_max_bytes %zu\r\n"
-            "END\r\n",
+            "enable_comp: %s\r\n"
+            "enable_dict: %s\r\n"
+            "dict_dir: %s\r\n"
+            "dict_size: %zu \r\n"
+            "zstd_level: %d \r\n"
+            "min_comp_size: %zu \r\n"
+            "max_comp_size: %zu \r\n"
+            "compress_keys: %s \r\n"
+            "enable_training: %s \r\n"
+            "retraining_interval: %" PRId64 "\r\n"
+            "min_training_size: %zu \r\n"
+            "ewma_alpha: %.6f\r\n"
+            "retrain_drop: %.6f\r\n"
+            "train_mode: %s\r\n"
+            "gc_cool_period: %d\r\n"
+            "gc_quarantine_period: %d\r\n"
+            "dict_retain_max: %d\r\n"
+            "enable_sampling: %s\r\n"
+            "sample_p: %.6f\r\n"
+            "sample_window_duration: %d\r\n"
+            "spool_dir: %s\r\n"
+            "spool_max_bytes: %zu",
             b2s(c->enable_comp),
             b2s(c->enable_dict),
             dict_dir,
@@ -378,7 +439,7 @@ static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
             "\"sample_window_duration\": %d,\r\n"
             "\"spool_dir\": \"%s\",\r\n"
             "\"spool_max_bytes\": %zu\r\n"
-            "}\r\n",
+            "}",
             b2s(c->enable_comp),
             b2s(c->enable_dict),
             dict_dir,
@@ -427,6 +488,137 @@ static int build_cfg(char **outp, size_t *lenp, int json) {
     return 0;
 }
 
+/* mcdc.config [json] */
+int MCDC_ConfigCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc)
+{
+    RedisModule_AutoMemory(ctx);
+    int want_json = 0;
+    /* Argument parsing */
+    if (argc == 2) {
+        size_t len;
+        const char *arg = RedisModule_StringPtrLen(argv[1], &len);
+
+        if (len == 4 && strncasecmp(arg, "json", 4) == 0) {
+            want_json = 1;
+        } else {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR unknown argument (only 'json' is supported)");
+        }
+
+    } else if (argc > 2) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR wrong number of arguments");
+    }
+    /* Call your existing config builder */
+    char *payload = NULL;
+    size_t plen = 0;
+    int rc = build_cfg(&payload, &plen, want_json);
+    if (rc != 0 || payload == NULL) {
+        if (payload) {
+            free(payload);
+            payload = NULL;
+        }
+        if (rc == -ENOMEM) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC config: memory allocation failed");
+        }
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC config: serialization failed");
+    }
+    /* Reply with simple string using the generated payload */
+    RedisModule_ReplyWithStringBuffer(ctx, payload, plen);
+    /* Cleanup your allocated payload */
+    free(payload);
+    return REDISMODULE_OK;
+}
+
+/* Build ASCII multiline payload:
+   NS global\r\n
+   NS <ns>\r\n ...
+   NS default\r\n (if not already present)
+   END\r\n
+*/
+static int build_ns_ascii(char **outp, size_t *lenp) {
+    size_t n = 0, i;
+    const char **list = mcdc_list_namespaces(&n);   /* may return NULL or contain NULLs */
+
+    /* First pass: compute size */
+    size_t total = 0;
+    total += sizeof("global\r\n") - 1;  /* always include global */
+    int has_default = 0;
+    for (i = 0; i < n; i++) {
+        const char *ns = list ? list[i] : NULL;
+        if (!ns) continue;
+        if (strcmp(ns, "default") == 0) has_default = 1;
+        if (i < n - 1) {
+            total += strlen(ns) + sizeof("\r\n") - 1;
+        } else {
+            total += strlen(ns);
+        }
+    }
+    if (!has_default) total += sizeof("default\r\n") - 1;
+    //total += sizeof("END\r\n") - 1;
+
+    char *buf = (char *)malloc(total + 1);
+    if (!buf) return -1;
+
+    /* Second pass: fill */
+    size_t off = 0;
+    off += (size_t)sprintf(buf + off, "global\r\n");
+    for (i = 0; i < n; i++) {
+        const char *ns = list ? list[i] : NULL;
+        if (!ns) continue;
+        if (i < n - 1) {
+            off += (size_t)sprintf(buf + off, "%s\r\n", ns);
+        } else {
+            off += (size_t)sprintf(buf + off, "%s", ns);
+        }
+    }
+    if (!has_default) off += (size_t)sprintf(buf + off, "\r\ndefault");
+    //off += (size_t)sprintf(buf + off, "END\r\n");
+    buf[off] = '\0';
+
+    if (list) free((void*)list);
+
+    *outp = buf; *lenp = off;
+    return 0;
+}
+
+/* mcdc.ns - namepsace list */
+int MCDC_NSCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc)
+{
+    REDISMODULE_NOT_USED(argv);
+    RedisModule_AutoMemory(ctx);
+    if (argc >= 2) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR wrong number of arguments");
+    }
+    /* Call your existing config builder */
+    char *payload = NULL;
+    size_t plen = 0;
+    int rc = build_ns_ascii(&payload, &plen);
+    if (rc != 0 || payload == NULL) {
+        if (payload) {
+            free(payload);
+            payload = NULL;
+        }
+        if (rc == -ENOMEM) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC ns: memory allocation failed");
+        }
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC ns: serialization failed");
+    }
+    /* Reply with simple string using the generated payload */
+    RedisModule_ReplyWithStringBuffer(ctx, payload, plen);
+    /* Cleanup your allocated payload */
+    free(payload);
+    return REDISMODULE_OK;
+}
 
 /*    mcdc stats ... */
 
@@ -439,41 +631,40 @@ static int build_stats_ascii(char **outp, size_t *lenp,
     if (!buf) { *outp = NULL; *lenp = 0; return -ENOMEM; }
 
     int n = snprintf(buf, cap,
-        "MCDC-STAT ns %s\r\n"
-        "MCDC-STAT ewma_m %.6f\r\n"
-        "MCDC-STAT baseline %.6f\r\n"
-        "MCDC-STAT comp_ratio %.6f\r\n"
-        "MCDC-STAT bytes_raw_total %" PRIu64 "\r\n"
-        "MCDC-STAT bytes_cmp_total %" PRIu64 "\r\n"
-        "MCDC-STAT reads_total %" PRIu64 "\r\n"
-        "MCDC-STAT writes_total %" PRIu64 "\r\n"
-        "MCDC-STAT dict_id %" PRIu32 "\r\n"
-        "MCDC-STAT dict_size %" PRIu32 "\r\n"
-        "MCDC-STAT total_dicts %" PRIu32 "\r\n"
-        "MCDC-STAT train_mode %" PRIu32 "\r\n"
-        "MCDC-STAT retrain %" PRIu32 "\r\n"
-        "MCDC-STAT last_retrain_ms %" PRIu64 "\r\n"
-        "MCDC-STAT trainer_runs %" PRIu64 "\r\n"
-        "MCDC-STAT trainer_errs %" PRIu64 "\r\n"
-        "MCDC-STAT trainer_ms_last %" PRIu64 "\r\n"
-        "MCDC-STAT reservoir_bytes %" PRIu64 "\r\n"
-        "MCDC-STAT reservoir_items %" PRIu64 "\r\n"
-        "MCDC-STAT shadow_pct %" PRIu32 "\r\n"
-        "MCDC-STAT shadow_samples %" PRIu64 "\r\n"
-        "MCDC-STAT shadow_raw=%" PRIu64 "\r\n"
-        "MCDC-STAT shadow_saved %" PRId64 "\r\n"
-        "MCDC-STAT promotions %" PRIu32 "\r\n"
-        "MCDC-STAT rollbacks %" PRIu32 "\r\n"
-        "MCDC-STAT triggers_rise %" PRIu32 "\r\n"
-        "MCDC-STAT triggers_drop %" PRIu32 "\r\n"
-        "MCDC-STAT cooldown_left %" PRIu32 "\r\n"
-        "MCDC-STAT compress_errs %" PRIu64 "\r\n"
-        "MCDC-STAT decompress_errs %" PRIu64 "\r\n"
-        "MCDC-STAT dict_miss_errs %" PRIu64 "\r\n"
-        "MCDC-STAT skipped_min %" PRIu64 "\r\n"
-        "MCDC-STAT skipped_max %" PRIu64 "\r\n"
-        "MCDC-STAT skipped_incomp %" PRIu64 "\r\n"
-        "END\r\n",
+        "ns: %s\r\n"
+        "ewma_m: %.6f\r\n"
+        "baseline: %.6f\r\n"
+        "comp_ratio: %.6f\r\n"
+        "bytes_raw_total: %" PRIu64 "\r\n"
+        "bytes_cmp_total: %" PRIu64 "\r\n"
+        "reads_total: %" PRIu64 "\r\n"
+        "writes_total: %" PRIu64 "\r\n"
+        "dict_id: %" PRIu32 "\r\n"
+        "dict_size: %" PRIu32 "\r\n"
+        "total_dicts: %" PRIu32 "\r\n"
+        "train_mode: %" PRIu32 "\r\n"
+        "retrain: %" PRIu32 "\r\n"
+        "last_retrain_ms: %" PRIu64 "\r\n"
+        "trainer_runs: %" PRIu64 "\r\n"
+        "trainer_errs: %" PRIu64 "\r\n"
+        "trainer_ms_last: %" PRIu64 "\r\n"
+        "reservoir_bytes: %" PRIu64 "\r\n"
+        "reservoir_items: %" PRIu64 "\r\n"
+        "shadow_pct: %" PRIu32 "\r\n"
+        "shadow_samples: %" PRIu64 "\r\n"
+        "shadow_raw: %" PRIu64 "\r\n"
+        "shadow_saved: %" PRId64 "\r\n"
+        "promotions: %" PRIu32 "\r\n"
+        "rollbacks: %" PRIu32 "\r\n"
+        "triggers_rise: %" PRIu32 "\r\n"
+        "triggers_drop: %" PRIu32 "\r\n"
+        "cooldown_left: %" PRIu32 "\r\n"
+        "compress_errs: %" PRIu64 "\r\n"
+        "decompress_errs: %" PRIu64 "\r\n"
+        "dict_miss_errs: %" PRIu64 "\r\n"
+        "skipped_min: %" PRIu64 "\r\n"
+        "skipped_max: %" PRIu64 "\r\n"
+        "skipped_incomp: %" PRIu64,
         ns ? ns : "global",
         s->ewma_m, s->baseline, s->cr_current,
         s->bytes_raw_total, s->bytes_cmp_total, s->reads_total, s->writes_total,
@@ -537,7 +728,7 @@ static int build_stats_json(char **outp, size_t *lenp,
         "\"skipped_min\": %" PRIu64 "," "\r\n"
         "\"skipped_max\": %" PRIu64 "," "\r\n"
         "\"skipped_incomp\": %" PRIu64 "\r\n"
-        "}\r\n",
+        "}",
         ns ? ns : "global",
         s->ewma_m, s->baseline, s->cr_current,
         s->bytes_raw_total, s->bytes_cmp_total, s->reads_total, s->writes_total,
@@ -559,191 +750,76 @@ static int build_stats_json(char **outp, size_t *lenp,
     return 0;
 }
 
-
-
-/* Build ASCII multiline payload:
-   NS global\r\n
-   NS <ns>\r\n ...
-   NS default\r\n (if not already present)
-   END\r\n
-*/
-static int build_ns_ascii(char **outp, size_t *lenp) {
-    size_t n = 0, i;
-    const char **list = mcdc_list_namespaces(&n);   /* may return NULL or contain NULLs */
-
-    /* First pass: compute size */
-    size_t total = 0;
-    total += sizeof("MCDC-NS global\r\n") - 1;  /* always include global */
-    int has_default = 0;
-    for (i = 0; i < n; i++) {
-        const char *ns = list ? list[i] : NULL;
-        if (!ns) continue;
-        if (strcmp(ns, "default") == 0) has_default = 1;
-        total += sizeof("MCDC-NS ") - 1 + strlen(ns) + sizeof("\r\n") - 1;
-    }
-    if (!has_default) total += sizeof("MCDC-NS default\r\n") - 1;
-    total += sizeof("END\r\n") - 1;
-
-    char *buf = (char *)malloc(total + 1);
-    if (!buf) return -1;
-
-    /* Second pass: fill */
-    size_t off = 0;
-    off += (size_t)sprintf(buf + off, "MCDC-NS global\r\n");
-    for (i = 0; i < n; i++) {
-        const char *ns = list ? list[i] : NULL;
-        if (!ns) continue;
-        off += (size_t)sprintf(buf + off, "MCDC-NS %s\r\n", ns);
-    }
-    if (!has_default) off += (size_t)sprintf(buf + off, "MCDC-NS default\r\n");
-    off += (size_t)sprintf(buf + off, "END\r\n");
-    buf[off] = '\0';
-
-    if (list) free((void*)list);
-
-    *outp = buf; *lenp = off;
-    return 0;
-}
-
-/* Text protocol main entry point */
-
-void process_mcdc_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
+int MCDC_StatsCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc)
 {
-
-    if (ntokens < 3 || strcmp(tokens[COMMAND_TOKEN].value, "mcdc") != 0) {
-        out_string(c, "CLIENT_ERROR bad command");
-        return;
+    RedisModule_AutoMemory(ctx);
+    if (argc < 2 || argc > 3) {
+        return RedisModule_ReplyWithError(
+                ctx, "ERR usage: mcdc.stats <namespace> [json]");
     }
-
-    const char *sub = tokens[COMMAND_TOKEN + 1].value;
-
-    /* --- mcz sampler  --- */
-    if (strcmp(sub, "sampler") == 0) {
-        handle_mcdc_sampler_ascii(c, tokens, ntokens);
-        return;
-    }
-
-    /* --- mcz config [json] --- */
-    if (strcmp(sub, "config") == 0) {
-        int want_json = 0;
-        if (ntokens == 4) {
-            const char *arg = tokens[COMMAND_TOKEN + 2].value;
-            if (strcmp(arg, "json") == 0){
-                want_json = 1;
-            } else {
-                out_string(c, "CLIENT_ERROR bad command");
-                return;
-            }
-        } else if (ntokens > 4){
-            out_string(c, "CLIENT_ERROR bad command");
-            return;
-        }
-
-        char *payload = NULL; size_t plen = 0;
-        int rc = build_cfg(&payload, &plen, want_json);
-        if (rc != 0 || !payload) {
-            if (rc != -ENOMEM){
-                out_string(c, "SERVER_ERROR config serialization failed");
-            } else {
-                out_string(c, "SERVER_ERROR memory allocation failed");
-            }
-            if(payload) free(payload);
-            return;
-        }
-        /* write_and_free takes ownership */
-        write_and_free(c, payload, (int)plen);
-        return;
-    }
-
-    /* mcz ns */
-    if (strcmp(sub, "ns") == 0) {
-        if (ntokens > 3){
-            out_string(c, "CLIENT_ERROR bad command");
-            return;
-        }
-        char *payload = NULL; size_t plen = 0;
-        if (build_ns_ascii(&payload, &plen) != 0) {
-            out_string(c, "SERVER_ERROR out of memory");
-            if(payload) free(payload);
-            return;
-        }
-        write_and_free(c, payload, plen);
-        return;
-    }
-    /*  mcz reload [json] */
-    if(strcmp(sub, "reload") == 0) {
-        int want_json = 0;
-        if (ntokens == 4 && tokens[COMMAND_TOKEN + 2].value &&
-            strcmp(tokens[COMMAND_TOKEN + 2].value, "json") == 0) {
-            want_json = 1;
-        } else if (ntokens >= 4){
-            out_string(c, "CLIENT_ERROR bad command");
-            return;
-        }
-        char *payload = NULL; size_t plen = 0;
-        if (build_reload_status(&payload, &plen, want_json) != 0) {
-            out_string(c, "SERVER_ERROR out of memory");
-            if(payload) free(payload);
-            return;
-        }
-        write_and_free(c, payload, plen);
-        return;
-    }
-
-    /* mcz stats */
-    if (ntokens < 3 || strcmp(tokens[COMMAND_TOKEN + 1].value, "stats") != 0) {
-        out_string(c, "CLIENT_ERROR bad command");
-        return;
-    }
-
-    const char *ns = NULL; /* NULL => global */
     int want_json = 0;
+    /* Argument parsing */
+    if (argc == 3) {
+        size_t len;
+        const char *arg = RedisModule_StringPtrLen(argv[2], &len);
 
-    if (ntokens >= 4) {
-        const char *arg1 = tokens[COMMAND_TOKEN + 2].value;
-        if (strcmp(arg1, "global") == 0) {
-            ns = NULL;
-        } else {
-            ns = arg1; /* includes "default" or any other namespace */
-        }
-    }
-    if (ntokens == 5) {
-        const char *arg2 = tokens[COMMAND_TOKEN + 3].value;
-        if (strcmp(arg2, "json") == 0) {
+        if (len == 4 && strncasecmp(arg, "json", 4) == 0) {
             want_json = 1;
         } else {
-            out_string(c, "CLIENT_ERROR bad command");
-            return;
+            return RedisModule_ReplyWithError(
+                ctx, "ERR unknown argument (only 'json' is supported)");
         }
-    } else if (ntokens > 5){
-        out_string(c, "CLIENT_ERROR bad command");
-        return;
     }
-
+    size_t len;
+    const char *arg = RedisModule_StringPtrLen(argv[1], &len);
+    const char *ns = NULL; /* NULL => global */
+    
+    if (strncasecmp(arg, "global", 6) == 0) {
+        ns = NULL;
+    } else {
+        ns = arg;
+    }
+    
     /* Build snapshot */
     mcdc_stats_snapshot_t snap;
     memset(&snap, 0, sizeof(snap));
-    size_t nlen = ns ? strlen(ns) : 0;
+    size_t nlen = ns ? len : 0;
     int rc = mcdc_get_stats_snapshot(&snap, ns, nlen);
     if (rc < 0) {
         if (rc != -ENOENT){
-            out_string(c, "SERVER_ERROR mcdc_get_stats_snapshot failed");
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC stats snapshot failed");
         } else {
-            out_string(c, "CLIENT_ERROR namespace does not exist");
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MSDC stats namespace does not exist");
         }
-        return;
     }
 
     /* Serialize */
-    char *out = NULL; size_t len = 0;
+    char *payload = NULL;
+    size_t plen = 0;
 
     if (want_json) {
-       rc = build_stats_json(&out, &len, ns ? ns : "global", &snap);
+       rc = build_stats_json(&payload, &plen, ns ? ns : "global", &snap);
     } else {
-       rc = build_stats_ascii(&out, &len, ns ? ns : "global", &snap);
+       rc = build_stats_ascii(&payload, &plen, ns ? ns : "global", &snap);
     }
-    if (rc < 0) { out_string(c, "SERVER_ERROR memory allocation failed"); return; }
-    if (!out) { out_string(c, "SERVER_ERROR serialization failed"); return; }
-
-    write_and_free(c, out, len);
+    if (rc != 0 || payload == NULL) {
+        if (payload) {
+            free(payload);
+            payload = NULL;
+        }
+        if (rc == -ENOMEM) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC stats: memory allocation failed");
+        }
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC stats: serialization failed");
+    }
+    /* Reply with simple string using the generated payload */
+    RedisModule_ReplyWithStringBuffer(ctx, payload, plen);
+    free(payload);
+    return REDISMODULE_OK;
 }
