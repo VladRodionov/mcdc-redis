@@ -251,11 +251,9 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
      *   - gracefully fall back to "raw" if the value is not encoded
      *     (e.g. key was set by plain SET, not mcdc.set)
      */
-    size_t key_len;
-    const char *key_ptr = RedisModule_StringPtrLen(argv[1], &key_len);
 
     char *out = NULL;
-    size_t outlen = mcdc_decode_value(key_ptr, key_len,
+    size_t outlen = mcdc_decode_value(kptr, klen,
                                 enc_ptr, enc_len,
                                 &out);
     if (outlen < 0 || !out) {
@@ -325,9 +323,13 @@ int MCDC_GetCommand(RedisModuleCtx *ctx,
 
     size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
     if (outlen < 0 || !out) {
+        /* Not MC/DC encoded or decompression failed:
+         * fall back to returning the raw Redis value.
+         * This is important for keys created by plain SET.
+         */
         if (out) free(out);
-        return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC get: decompression failed");
+        RedisModule_ReplyWithStringBuffer(ctx, rptr, rlen);
+        return REDISMODULE_OK;
     }
 
     /* Return uncompressed payload as bulk string */
@@ -392,8 +394,8 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
     size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
     if (outlen < 0 || !out) {
         if (out) free(out);
-        return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC get: decompression failed");
+        RedisModule_ReplyWithStringBuffer(ctx, rptr, rlen);
+        return REDISMODULE_OK;
     }
 
     /* Return uncompressed payload as bulk string */
@@ -403,7 +405,7 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
     return REDISMODULE_OK;
 }
 /* ------------------------------------------------------------------------- */
-/* mcdc.get key                                                              */
+/* mcdc.getex key                                                              */
 /* ------------------------------------------------------------------------- */
 int MCDC_GetExCommand(RedisModuleCtx *ctx,
                       RedisModuleString **argv,
@@ -460,8 +462,8 @@ int MCDC_GetExCommand(RedisModuleCtx *ctx,
     size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
     if (outlen < 0 || !out) {
         if (out) free(out);
-        return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC getex: decompression failed");
+        RedisModule_ReplyWithStringBuffer(ctx, rptr, rlen);
+        return REDISMODULE_OK;
     }
 
     /* Return uncompressed payload as bulk string */
@@ -469,7 +471,118 @@ int MCDC_GetExCommand(RedisModuleCtx *ctx,
     free(out);
     return REDISMODULE_OK;
 }
+/* ------------------------------------------------------------------------- */
+/* mcdc.getset key                                                              */
+/* ------------------------------------------------------------------------- */
+int MCDC_GetSetCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc)
+{
+    RedisModule_AutoMemory(ctx);
 
+    if (argc != 3) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getset: wrong number of arguments (expected: mcdc.getset key value)");
+    }
+
+    /* Get key + value bytes */
+    size_t klen, vlen;
+    const char *kptr = RedisModule_StringPtrLen(argv[1], &klen);
+    const char *vptr = RedisModule_StringPtrLen(argv[2], &vlen);
+
+    if (!kptr || !vptr) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getset: failed to read arguments");
+    }
+
+    /* MC/DC sampling hook */
+    mcdc_sample(kptr, klen, vptr, vlen);
+
+    /* Compress + wrap value with MC/DC header */
+    char *stored = NULL;
+    int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+    if (slen < 0) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getset: compression failed");
+    }
+
+    bool need_dealloc = false;
+    if (!stored) {
+        /* Value is too small/too large to compress, store as:
+         *   [u16 = -1][raw bytes...]
+         */
+        need_dealloc = true;
+        slen = (int)(sizeof(uint16_t) + vlen);
+        stored = RedisModule_Alloc(slen);
+        if (!stored) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC getset: memory allocation failed");
+        }
+        write_u16(stored, -1);
+        memcpy(stored + sizeof(uint16_t), vptr, vlen);
+    }
+
+    /* Create Redis string from encoded value */
+    RedisModuleString *encoded =
+        RedisModule_CreateString(ctx, stored, slen);
+
+    /* Free temp buffer if it was heap-allocated just for this call */
+    if (need_dealloc) {
+        RedisModule_Free(stored);
+    }
+
+    /* Call underlying Redis GETSET:
+     *   GETSET key encoded_value
+     */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "GETSET", "ss", argv[1], encoded);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getset: underlying GETSET failed");
+    }
+
+    int rtype = RedisModule_CallReplyType(reply);
+
+    if (rtype == REDISMODULE_REPLY_NULL) {
+        /* Behave like GETSET: return (nil) if key didn't exist */
+        return RedisModule_ReplyWithNull(ctx);
+    }
+
+    if (rtype != REDISMODULE_REPLY_STRING) {
+        /* Should not happen, but be defensive */
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getset: unexpected reply type from GETSET");
+    }
+
+    /* Extract old (encoded) value */
+    size_t rlen;
+    const char *rptr = RedisModule_CallReplyStringPtr(reply, &rlen);
+
+    if (!rptr) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getset: failed to read GETSET reply");
+    }
+
+    /* Decode/decompress previous value.
+     * This should gracefully handle:
+     *  - MC/DC-encoded values, and
+     *  - plain raw values (if key was written by normal SET).
+     */
+
+    char *out = NULL;
+    size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+    if (outlen < 0 || !out) {
+        if (out) free(out);
+        RedisModule_ReplyWithStringBuffer(ctx, rptr, rlen);
+        return REDISMODULE_OK;
+    }
+
+    /* Return decoded old value */
+    RedisModule_ReplyWithStringBuffer(ctx, out, outlen);
+    free(out);
+    return REDISMODULE_OK;
+}
 /* ------------------------------------------------------------------------- */
 /* Registration helper                                                       */
 /* ------------------------------------------------------------------------- */
@@ -506,6 +619,15 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
             "mcdc.getex",
             MCDC_GetExCommand,
             "write",   /* modifies keyspace */
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+    
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.getset",
+            MCDC_GetSetCommand,
+            "write",   /* GETSET writes the key */
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
