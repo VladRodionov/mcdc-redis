@@ -267,6 +267,82 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
 
     return REDISMODULE_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* mcdc.setnx key value                                                      */
+/* ------------------------------------------------------------------------- */
+
+int MCDC_SetNxCommand(RedisModuleCtx *ctx,
+                    RedisModuleString **argv,
+                    int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 3) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC setnx: wrong number of arguments (expected: mcdc.setnx)");
+    }
+
+    /* Get key + value bytes */
+    size_t klen, vlen;
+    const char *kptr = RedisModule_StringPtrLen(argv[1], &klen);
+    const char *vptr = RedisModule_StringPtrLen(argv[2], &vlen);
+
+    if (!kptr || !vptr) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC setnx: failed to read arguments");
+    }
+
+    /* MC/DC sampling hook */
+    mcdc_sample(kptr, klen, vptr, vlen);
+
+    /* Compress + wrap value with MC/DC header */
+    char *stored = NULL;
+    int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+    if (slen < 0) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC setnx: compression failed");
+    }
+
+    bool need_dealloc = false;
+    if (!stored) {
+        /* value smaller than min or bigger than max to compress
+         * store as: [u16 = -1][raw bytes...]
+         */
+        need_dealloc = true;
+        slen = (int)(sizeof(uint16_t) + vlen);
+        stored = RedisModule_Alloc(slen);
+        if (!stored) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC setnx: memory allocation failed");
+        }
+        write_u16(stored, -1);
+        memcpy(stored + sizeof(uint16_t), vptr, vlen);
+    }
+
+    RedisModuleString *encoded =
+        RedisModule_CreateString(ctx, stored, slen);
+
+    /* If this buffer was allocated just for this call, free it.
+     * If mcdc_encode_value uses TLS, it can keep its own buffer.
+     */
+    if (need_dealloc) {
+        RedisModule_Free(stored);
+    }
+
+    /* Call underlying Redis SETNX command */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "SETNX", "ss", argv[1], encoded);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC set: underlying SET failed");
+    }
+
+    return RedisModule_ReplyWithCallReply(ctx, reply);
+
+}
+
 /* ------------------------------------------------------------------------- */
 /* mcdc.get key                                                              */
 /* ------------------------------------------------------------------------- */
@@ -349,7 +425,7 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
 
     if (argc != 2) {
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC get: wrong number of arguments (expected: mcdc.get key)");
+            ctx, "ERR MCDC getdel: wrong number of arguments (expected: mcdc.getdel key)");
     }
 
     /* Call underlying Redis GET:
@@ -360,7 +436,7 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
 
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC get: underlying GET failed");
+            ctx, "ERR MCDC getdel: underlying GETDEL failed");
     }
 
     int rtype = RedisModule_CallReplyType(reply);
@@ -373,7 +449,7 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
     if (rtype != REDISMODULE_REPLY_STRING) {
         /* This should not happen with GET, but be defensive */
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC get: unexpected reply type from GET");
+            ctx, "ERR MCDC getdel: unexpected reply type from GETDEL");
     }
 
     /* Extract blob returned by GET */
@@ -382,7 +458,7 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
 
     if (!rptr) {
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC get: failed to read GET reply");
+            ctx, "ERR MCDC getdel: failed to read GETDEL reply");
     }
 
     /* Decompress if needed, based on MC/DC header */
@@ -404,6 +480,7 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
     free(out);
     return REDISMODULE_OK;
 }
+
 /* ------------------------------------------------------------------------- */
 /* mcdc.getex key                                                              */
 /* ------------------------------------------------------------------------- */
@@ -598,6 +675,15 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
         return REDISMODULE_ERR;
     }
 
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.setnx",
+            MCDC_SetNxCommand,
+            "write",   /* modifies keyspace */
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+    
     if (RedisModule_CreateCommand(ctx,
             "mcdc.get",
             MCDC_GetCommand,
