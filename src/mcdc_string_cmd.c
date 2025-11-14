@@ -954,101 +954,283 @@ int MCDC_StrlenCommand(RedisModuleCtx *ctx,
      */
     return RedisModule_ReplyWithLongLong(ctx, (long long)rlen);
 }
+/* ------------------------------------------------------------------------- */
+/* mcdc.mget key [key ...] - multi get                                       */
+/* ------------------------------------------------------------------------- */
+int MCDC_MGetCommand(RedisModuleCtx *ctx,
+                     RedisModuleString **argv,
+                     int argc)
+{
+    RedisModule_AutoMemory(ctx);
 
+    if (argc < 2) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC mget: wrong number of arguments (expected: mcdc.mget key [key ...])");
+    }
+
+    int nkeys = argc - 1;
+
+    /* Call underlying Redis MGET:
+     *   MGET key1 key2 ... keyN
+     *
+     * We forward all keys from argv[1..argc-1].
+     */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "MGET", "v", argv + 1, nkeys);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC mget: underlying MGET failed");
+    }
+
+    if (RedisModule_CallReplyType(reply) != REDISMODULE_REPLY_ARRAY) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC mget: unexpected reply type from MGET");
+    }
+
+    size_t arrlen = RedisModule_CallReplyLength(reply);
+    if (arrlen != (size_t)nkeys) {
+        /* Should not happen, but be defensive */
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC mget: unexpected array length from MGET");
+    }
+
+    /* Build the top-level reply array: one element per key */
+    RedisModule_ReplyWithArray(ctx, nkeys);
+
+    for (int i = 0; i < nkeys; i++) {
+        RedisModuleCallReply *elem =
+            RedisModule_CallReplyArrayElement(reply, i);
+
+        int etype = RedisModule_CallReplyType(elem);
+
+        if (etype == REDISMODULE_REPLY_NULL) {
+            /* Key does not exist -> (nil) */
+            RedisModule_ReplyWithNull(ctx);
+            continue;
+        }
+
+        if (etype == REDISMODULE_REPLY_ERROR) {
+            /* MGET normally doesn't return errors per element, but in case it does,
+             * just pass the error object through as the array element.
+             */
+            RedisModule_ReplyWithCallReply(ctx, elem);
+            continue;
+        }
+
+        if (etype != REDISMODULE_REPLY_STRING) {
+            /* Very unexpected; still pass through whatever Redis gave us */
+            RedisModule_ReplyWithCallReply(ctx, elem);
+            continue;
+        }
+
+        /* Extract stored (possibly MC/DC-encoded) value */
+        size_t rlen;
+        const char *rptr = RedisModule_CallReplyStringPtr(elem, &rlen);
+        if (!rptr) {
+            /* Treat as nil if we can't read it */
+            RedisModule_ReplyWithNull(ctx);
+            continue;
+        }
+
+        /* Key name for this element is argv[i+1] */
+        size_t klen;
+        const char *kptr = RedisModule_StringPtrLen(argv[i + 1], &klen);
+
+        char *out = NULL;
+        ssize_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+
+        if (outlen < 0 || !out) {
+            /* Not MC/DC-encoded or decode failed: fall back to raw value,
+             * so keys created by plain SET/MSET still work.
+             */
+            if (out) free(out);
+            RedisModule_ReplyWithStringBuffer(ctx, rptr, rlen);
+            continue;
+        }
+
+        /* Return decoded value for this element */
+        RedisModule_ReplyWithStringBuffer(ctx, out, (size_t)outlen);
+        free(out);
+    }
+
+    return REDISMODULE_OK;
+}
+
+/* ------------------------------------------------------------------------- */
+/* mcdc.mset key value [key value ...] - multi set                           */
+/* ------------------------------------------------------------------------- */
+int MCDC_MSetCommand(RedisModuleCtx *ctx,
+                     RedisModuleString **argv,
+                     int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    /* mcdc.mset key1 value1 [key2 value2 ...] */
+    if (argc < 3 || (argc % 2) == 0) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC mset: wrong number of arguments (expected: mcdc.mset key value [key value ...])");
+    }
+
+    int n_pairs   = (argc - 1) / 2;
+    int mset_argc = argc - 1;  /* everything except module command name */
+
+    /* We’ll build argv for underlying MSET:
+     *   MSET key1 enc_v1 key2 enc_v2 ...
+     */
+    RedisModuleString **mset_argv =
+        RedisModule_PoolAlloc(ctx, sizeof(RedisModuleString *) * mset_argc);
+
+    /* For each (key, value) pair */
+    for (int i = 0; i < n_pairs; i++) {
+        int key_index = 1 + 2 * i;
+        int val_index = key_index + 1;
+
+        RedisModuleString *key   = argv[key_index];
+        RedisModuleString *value = argv[val_index];
+
+        /* Put key into the MSET argv */
+        mset_argv[2 * i] = key;
+
+        /* Get raw key/value bytes */
+        size_t klen, vlen;
+        const char *kptr = RedisModule_StringPtrLen(key, &klen);
+        const char *vptr = RedisModule_StringPtrLen(value, &vlen);
+
+        if (!kptr || !vptr) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC mset: failed to read arguments");
+        }
+
+        /* MC/DC sampling hook */
+        mcdc_sample(kptr, klen, vptr, vlen);
+
+        /* Compress + wrap value with MC/DC header */
+        char *stored = NULL;
+        int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+        if (slen < 0) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC mset: compression failed");
+        }
+
+        bool need_dealloc = false;
+        if (!stored) {
+            /* value smaller than min or bigger than max to compress
+             * We store as:
+             *   [u16 = -1][raw bytes...]
+             */
+            need_dealloc = true;
+            slen = (int)(sizeof(uint16_t) + vlen);
+            stored = malloc(slen);
+            if (!stored) {
+                return RedisModule_ReplyWithError(
+                    ctx, "ERR MCDC mset: memory allocation failed");
+            }
+            write_u16(stored, -1);
+            memcpy(stored + sizeof(uint16_t), vptr, vlen);
+        }
+
+        /* Create Redis string from encoded value */
+        RedisModuleString *encoded =
+            RedisModule_CreateString(ctx, stored, slen);
+
+        /* If we allocated the buffer just for this call, free it.
+         * If mcdc_encode_value uses TLS, it can keep its own buffer.
+         */
+        if (need_dealloc) {
+            free(stored);
+        }
+
+        /* Put encoded value into the MSET argv */
+        mset_argv[2 * i + 1] = encoded;
+    }
+
+    /* Call underlying Redis MSET with all encoded pairs */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "MSET", "v", mset_argv, mset_argc);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC mset: underlying MSET failed");
+    }
+
+    /* Redis MSET normally returns "OK" */
+    return RedisModule_ReplyWithCallReply(ctx, reply);
+}
 /* ------------------------------------------------------------------------- */
 /* Registration helper                                                       */
 /* ------------------------------------------------------------------------- */
 
 int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
 {
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.set",
-            MCDC_SetCommand,
-            "write",   /* modifies keyspace */
+    if (RedisModule_CreateCommand(ctx, "mcdc.set", MCDC_SetCommand, "write",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
 
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.setnx",
-            MCDC_SetNxCommand,
-            "write",   /* modifies keyspace */
+    if (RedisModule_CreateCommand(ctx, "mcdc.setnx", MCDC_SetNxCommand, "write",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.setex",
-            MCDC_SetExCommand,
-            "write",   /* modifies keyspace */
+    if (RedisModule_CreateCommand(ctx, "mcdc.setex", MCDC_SetExCommand, "write",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
 
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.psetex",
-            MCDC_PsetExCommand,
-            "write",   /* modifies keyspace */
+    if (RedisModule_CreateCommand(ctx, "mcdc.psetex", MCDC_PsetExCommand, "write",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.get",
-            MCDC_GetCommand,
-            "readonly",  /* does not modify keyspace */
+    if (RedisModule_CreateCommand(ctx, "mcdc.get", MCDC_GetCommand, "readonly",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.getdel",
-            MCDC_GetDelCommand,
-            "write",   /* modifies keyspace */
+    if (RedisModule_CreateCommand(ctx, "mcdc.getdel", MCDC_GetDelCommand, "write",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.getex",
-            MCDC_GetExCommand,
-            "write",   /* modifies keyspace */
+    if (RedisModule_CreateCommand(ctx, "mcdc.getex", MCDC_GetExCommand, "write",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.getset",
-            MCDC_GetSetCommand,
-            "write",   /* GETSET writes the key */
+    if (RedisModule_CreateCommand(ctx, "mcdc.getset", MCDC_GetSetCommand, "write",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.cstrlen",
-            MCDC_CstrlenCommand,
-            "readonly",
+    if (RedisModule_CreateCommand(ctx, "mcdc.cstrlen", MCDC_CstrlenCommand, "readonly",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.strlen",
-            MCDC_StrlenCommand,
-            "readonly",
+    if (RedisModule_CreateCommand(ctx, "mcdc.strlen", MCDC_StrlenCommand, "readonly",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
+    if (RedisModule_CreateCommand(ctx, "mcdc.mget", MCDC_MGetCommand, "readonly",
+            1, -1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
     
+    if (RedisModule_CreateCommand(ctx, "mcdc.mset", MCDC_MSetCommand, "write",
+            1, -1, 2) == REDISMODULE_ERR)  /* keys: argv[1], argv[3], ..., step=2 */
+    {
+        return REDISMODULE_ERR;
+    }
     return REDISMODULE_OK;
 }
