@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <zstd.h>
 
 #include "redismodule.h"
 #include "mcdc_string_cmd.h"
@@ -855,6 +856,106 @@ int MCDC_CstrlenCommand(RedisModuleCtx *ctx,
 }
 
 /* ------------------------------------------------------------------------- */
+/* mcdc.strlen key  - value length                                           */
+/* ------------------------------------------------------------------------- */
+int MCDC_StrlenCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 2) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC strlen: wrong number of arguments (expected: mcdc.strlen key)");
+    }
+
+    /* Call underlying Redis GET:
+     *   GET key
+     *
+     * We want the logical length of the *decoded* value, but for
+     * compressed values we can get it from the Zstd frame header
+     * without actually decompressing.
+     */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "GET", "s", argv[1]);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC strlen: underlying GET failed");
+    }
+
+    int rtype = RedisModule_CallReplyType(reply);
+
+    if (rtype == REDISMODULE_REPLY_NULL) {
+        /* Behave like STRLEN: non-existing key -> 0 */
+        return RedisModule_ReplyWithLongLong(ctx, 0);
+    }
+
+    if (rtype == REDISMODULE_REPLY_ERROR) {
+        /* WRONGTYPE or other error from GET: pass it through */
+        return RedisModule_ReplyWithCallReply(ctx, reply);
+    }
+
+    if (rtype != REDISMODULE_REPLY_STRING) {
+        /* Should not happen, but be defensive */
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC strlen: unexpected reply type from GET");
+    }
+
+    /* Extract stored (possibly MC/DC-encoded) value */
+    size_t rlen;
+    const char *rptr = RedisModule_CallReplyStringPtr(reply, &rlen);
+    if (!rptr) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC strlen: failed to read GET reply");
+    }
+
+    /* Case 1: too short to have a MC/DC header -> treat as raw. */
+    if (rlen < sizeof(uint16_t)) {
+        return RedisModule_ReplyWithLongLong(ctx, (long long)rlen);
+    }
+
+    /* Read dict_id from header */
+    int did = read_u16((char *)rptr);
+    const char *payload = rptr + sizeof(uint16_t);
+    size_t plen = rlen - sizeof(uint16_t);
+
+    /* Case 2: did == -1 => stored raw with header:
+     *   [0xFF 0xFF][raw bytes...]
+     */
+    if (did == -1) {
+        return RedisModule_ReplyWithLongLong(ctx, (long long)plen);
+    }
+
+    /* Case 3: did >= 0 => compressed Zstd frame in payload.
+     * Use ZSTD_getFrameContentSize() to get original size without
+     * decompressing.
+     *
+     * NOTE: This function may return:
+     *   - exact size
+     *   - ZSTD_CONTENTSIZE_UNKNOWN
+     *   - ZSTD_CONTENTSIZE_ERROR
+     */
+    unsigned long long rawSize =
+        ZSTD_getFrameContentSize(payload, plen);
+
+    if (rawSize != ZSTD_CONTENTSIZE_ERROR &&
+        rawSize != ZSTD_CONTENTSIZE_UNKNOWN)
+    {
+        /* Valid Zstd frame with known uncompressed size */
+        return RedisModule_ReplyWithLongLong(ctx, (long long)rawSize);
+    }
+
+    /* Fallback:
+     * - Value was not really Zstd-compressed MC/DC data (e.g. plain SET)
+     * - Or frame header is corrupted / incomplete
+     *
+     * In either case, treat entire value as raw and return rlen.
+     */
+    return RedisModule_ReplyWithLongLong(ctx, (long long)rlen);
+}
+
+/* ------------------------------------------------------------------------- */
 /* Registration helper                                                       */
 /* ------------------------------------------------------------------------- */
 
@@ -934,6 +1035,15 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
     if (RedisModule_CreateCommand(ctx,
             "mcdc.cstrlen",
             MCDC_CstrlenCommand,
+            "readonly",
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+    
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.strlen",
+            MCDC_StrlenCommand,
             "readonly",
             1, 1, 1) == REDISMODULE_ERR)
     {
