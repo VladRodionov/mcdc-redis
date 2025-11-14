@@ -269,7 +269,7 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
 }
 
 /* ------------------------------------------------------------------------- */
-/* mcdc.setex key value  (full set of options is supported)                                                      */
+/* mcdc.setex key expire value  (full set of options is supported)           */
 /* ------------------------------------------------------------------------- */
 
 int MCDC_SetExCommand(RedisModuleCtx *ctx,
@@ -280,7 +280,7 @@ int MCDC_SetExCommand(RedisModuleCtx *ctx,
 
     if (argc != 4) {
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC setex: wrong number of arguments (expected: mcdc.setex key value [options])");
+            ctx, "ERR MCDC setex: wrong number of arguments (expected: mcdc.setex key expire value)");
     }
 
     /* Get key + value bytes */
@@ -290,7 +290,7 @@ int MCDC_SetExCommand(RedisModuleCtx *ctx,
 
     if (!kptr || !vptr) {
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC set: failed to read arguments");
+            ctx, "ERR MCDC setex: failed to read arguments");
     }
 
     /* MC/DC sampling hook */
@@ -346,6 +346,90 @@ int MCDC_SetExCommand(RedisModuleCtx *ctx,
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC setex: underlying SETEX failed");
+    }
+
+    return RedisModule_ReplyWithCallReply(ctx, reply);
+
+}
+
+/* ------------------------------------------------------------------------- */
+/* mcdc.psetex key expire value                                              */
+/* ------------------------------------------------------------------------- */
+
+int MCDC_PsetExCommand(RedisModuleCtx *ctx,
+                    RedisModuleString **argv,
+                    int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 4) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC psetex: wrong number of arguments (expected: mcdc.psetex key expire value)");
+    }
+
+    /* Get key + value bytes */
+    size_t klen, vlen;
+    const char *kptr = RedisModule_StringPtrLen(argv[1], &klen);
+    const char *vptr = RedisModule_StringPtrLen(argv[3], &vlen);
+
+    if (!kptr || !vptr) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC psetx: failed to read arguments");
+    }
+
+    /* MC/DC sampling hook */
+    mcdc_sample(kptr, klen, vptr, vlen);
+
+    /* Compress + wrap value with MC/DC header */
+    char *stored = NULL;
+    int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+    if (slen < 0) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC psetex: compression failed");
+    }
+
+    bool need_dealloc = false;
+    if (!stored) {
+        /* value smaller than min or bigger than max to compress
+         * store as: [u16 = -1][raw bytes...]
+         */
+        need_dealloc = true;
+        slen = (int)(sizeof(uint16_t) + vlen);
+        stored = RedisModule_Alloc(slen);
+        if (!stored) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC psetex: memory allocation failed");
+        }
+        write_u16(stored, -1);
+        memcpy(stored + sizeof(uint16_t), vptr, vlen);
+    }
+
+    RedisModuleString *encoded =
+        RedisModule_CreateString(ctx, stored, slen);
+
+    /* If this buffer was allocated just for this call, free it.
+     * If mcdc_encode_value uses TLS, it can keep its own buffer.
+     */
+    if (need_dealloc) {
+        RedisModule_Free(stored);
+    }
+
+
+    int set_argc = 3;
+    RedisModuleString **set_argv =
+        RedisModule_PoolAlloc(ctx, sizeof(RedisModuleString *) * set_argc);
+
+    set_argv[0] = argv[1];      /* key */
+    set_argv[1] = argv[2];      /* expiration */
+    set_argv[2] = encoded;      /* compressed value */
+
+    /* Call underlying Redis SETEX command with full options preserved */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "PSETEX", "v", set_argv, set_argc);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC psetex: underlying PSETEX failed");
     }
 
     return RedisModule_ReplyWithCallReply(ctx, reply);
@@ -772,6 +856,15 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
     if (RedisModule_CreateCommand(ctx,
             "mcdc.setex",
             MCDC_SetExCommand,
+            "write",   /* modifies keyspace */
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.psetex",
+            MCDC_PsetExCommand,
             "write",   /* modifies keyspace */
             1, 1, 1) == REDISMODULE_ERR)
     {
