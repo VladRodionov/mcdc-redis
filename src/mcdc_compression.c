@@ -839,14 +839,16 @@ ssize_t mcdc_maybe_compress(const void *src, size_t src_sz, const void *key, siz
     uint16_t did = meta? meta->id:0;
 
     /* 2.  prepare TLS scratch ------------------------------------ */
-    size_t bound = ZSTD_compressBound(src_sz);
+    int did_room = sizeof(uint16_t); // 2 bytes
+    size_t bound = ZSTD_compressBound(src_sz + did_room);
     tls_ensure(bound);                         /* ensure scratch ≥ bound */
     void *dst_buf = tls.scratch;
+    /* Add */
     
     CHECK_Z(ZSTD_CCtx_refCDict(tls.cctx, cd));
 
     /* 3.  compress ----------------------------------------------- */
-    size_t csz = ZSTD_compress2(tls.cctx, dst_buf, bound, src, src_sz);
+    size_t csz = ZSTD_compress2(tls.cctx, (char *)dst_buf + did_room, bound, src, src_sz);
     if (ZSTD_isError(csz)) {
         atomic_inc64(&stats->compress_errs, 1);
         return -1;
@@ -861,6 +863,8 @@ ssize_t mcdc_maybe_compress(const void *src, size_t src_sz, const void *key, siz
     /* 5.  ratio check – skip if no benefit ----------------------- */
     if (csz >= src_sz) {
         atomic_inc64(&stats->skipped_comp_incomp, 1);
+        /* no compression - must check */
+        *dst         = dst_buf;          /* valid until same thread calls tls_ensure() again */
         return 0;
     }
     atomic_inc64(&stats->bytes_cmp_total, csz);

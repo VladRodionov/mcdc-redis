@@ -7,6 +7,7 @@
 #include "mcdc_module.h"
 #include "mcdc_compression.h"
 #include "mcdc_admin_cmd.h"
+#include "mcdc_string_cmd.h"
 
 
 static void MCDC_LogCwd(RedisModuleCtx *ctx) {
@@ -28,31 +29,9 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         return REDISMODULE_ERR;
     }
 
-    if (RedisModule_CreateCommand(ctx, "mcdc.stats", MCDC_StatsCommand, "fast", 0, 0, 0)
-        == REDISMODULE_ERR) {
-        return REDISMODULE_ERR;
-    }
-
-    if (RedisModule_CreateCommand(ctx, "mcdc.config", MCDC_ConfigCommand, "fast", 0, 0, 0)
-        == REDISMODULE_ERR) {
-    	return REDISMODULE_ERR;
-    }
-
-    if (RedisModule_CreateCommand(ctx, "mcdc.sampler", MCDC_SamplerCommand, "fast", 0, 0, 0)
-        == REDISMODULE_ERR) {
-        return REDISMODULE_ERR;
-    }
-
-    if (RedisModule_CreateCommand(ctx, "mcdc.reload", MCDC_ReloadCommand, "fast", 0, 0, 0)
-        == REDISMODULE_ERR) {
-        return REDISMODULE_ERR;
-    }
-
-    if (RedisModule_CreateCommand(ctx, "mcdc.ns", MCDC_NSCommand, "fast", 0, 0, 0)
-        == REDISMODULE_ERR) {
-        return REDISMODULE_ERR;
-    }
-
+    MCDC_RegisterAdminCommands(ctx);
+    MCDC_RegisterStringCommands(ctx);
+    
     /* Load and parse config directly */
     if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)
          return REDISMODULE_ERR;

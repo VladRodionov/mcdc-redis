@@ -823,3 +823,37 @@ int MCDC_StatsCommand(RedisModuleCtx *ctx,
     free(payload);
     return REDISMODULE_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Registration helper                                                       */
+/* ------------------------------------------------------------------------- */
+
+int MCDC_RegisterAdminCommands(RedisModuleCtx *ctx)
+{
+    if (RedisModule_CreateCommand(ctx, "mcdc.stats", MCDC_StatsCommand, "fast", 0, 0, 0)
+        == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "mcdc.config", MCDC_ConfigCommand, "fast", 0, 0, 0)
+        == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "mcdc.sampler", MCDC_SamplerCommand, "fast", 0, 0, 0)
+        == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "mcdc.reload", MCDC_ReloadCommand, "fast", 0, 0, 0)
+        == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "mcdc.ns", MCDC_NSCommand, "fast", 0, 0, 0)
+        == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    return REDISMODULE_OK;
+}

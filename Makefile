@@ -83,7 +83,8 @@ SRC = \
   src/mcdc_sampling.c \
   src/mcdc_stats.c \
   src/mcdc_utils.c \
-  src/mcdc_admin_cmd.c
+  src/mcdc_admin_cmd.c \
+  src/mcdc_string_cmd.c
 
 OBJ    = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRC))
 TARGET = $(BUILD_DIR)/mcdc.$(SHLIB_EXT)

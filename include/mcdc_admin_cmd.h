@@ -35,6 +35,7 @@ int MCDC_SamplerCommand(RedisModuleCtx *ctx,
 int MCDC_ReloadCommand(RedisModuleCtx *ctx,
                        RedisModuleString **argv,
                        int argc);
+int MCDC_RegisterAdminCommands(RedisModuleCtx *ctx);
 
 #ifdef __cplusplus
 }
