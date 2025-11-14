@@ -336,7 +336,9 @@ int MCDC_GetCommand(RedisModuleCtx *ctx,
     free(out);
     return REDISMODULE_OK;
 }
-
+/* ------------------------------------------------------------------------- */
+/* mcdc.getdel key                                                           */
+/* ------------------------------------------------------------------------- */
 int MCDC_GetDelCommand(RedisModuleCtx *ctx,
                     RedisModuleString **argv,
                     int argc)
@@ -400,6 +402,73 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
     free(out);
     return REDISMODULE_OK;
 }
+/* ------------------------------------------------------------------------- */
+/* mcdc.get key                                                              */
+/* ------------------------------------------------------------------------- */
+int MCDC_GetExCommand(RedisModuleCtx *ctx,
+                      RedisModuleString **argv,
+                      int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if (argc < 2) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getex: wrong number of arguments (expected: mcdc.getex key [options])");
+    }
+
+    /* Call underlying Redis GETEX:
+     *   GETEX key [EX seconds | PX ms | EXAT ts | PXAT ts_ms | PERSIST]
+     *
+     * We forward everything except the module command name:
+     *   argv[1..argc-1] -> GETEX args
+     */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "GETEX", "v", argv + 1, argc - 1);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getex: underlying GETEX failed");
+    }
+
+    int rtype = RedisModule_CallReplyType(reply);
+
+    if (rtype == REDISMODULE_REPLY_NULL) {
+        /* Behave like GETEX: return null bulk string if key missing */
+        return RedisModule_ReplyWithNull(ctx);
+    }
+
+    if (rtype != REDISMODULE_REPLY_STRING) {
+        /* Should not happen for GETEX on a string key, but be defensive */
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getex: unexpected reply type from GETEX");
+    }
+
+    /* Extract blob returned by GETEX */
+    size_t rlen;
+    const char *rptr = RedisModule_CallReplyStringPtr(reply, &rlen);
+
+    if (!rptr) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getex: failed to read GETEX reply");
+    }
+
+    /* Decompress / decode if needed, based on MC/DC header */
+    size_t klen;
+    const char *kptr = RedisModule_StringPtrLen(argv[1], &klen);
+
+    char *out = NULL;
+    size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+    if (outlen < 0 || !out) {
+        if (out) free(out);
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC getex: decompression failed");
+    }
+
+    /* Return uncompressed payload as bulk string */
+    RedisModule_ReplyWithStringBuffer(ctx, out, outlen);
+    free(out);
+    return REDISMODULE_OK;
+}
 
 /* ------------------------------------------------------------------------- */
 /* Registration helper                                                       */
@@ -427,6 +496,15 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
     if (RedisModule_CreateCommand(ctx,
             "mcdc.getdel",
             MCDC_GetDelCommand,
+            "write",   /* modifies keyspace */
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+    
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.getex",
+            MCDC_GetExCommand,
             "write",   /* modifies keyspace */
             1, 1, 1) == REDISMODULE_ERR)
     {
