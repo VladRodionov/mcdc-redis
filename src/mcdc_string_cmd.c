@@ -337,6 +337,70 @@ int MCDC_GetCommand(RedisModuleCtx *ctx,
     return REDISMODULE_OK;
 }
 
+int MCDC_GetDelCommand(RedisModuleCtx *ctx,
+                    RedisModuleString **argv,
+                    int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 2) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC get: wrong number of arguments (expected: mcdc.get key)");
+    }
+
+    /* Call underlying Redis GET:
+     *   GETDEL key
+     */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "GETDEL", "s", argv[1]);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC get: underlying GET failed");
+    }
+
+    int rtype = RedisModule_CallReplyType(reply);
+
+    if (rtype == REDISMODULE_REPLY_NULL) {
+        /* Behave like GET: return null bulk string */
+        return RedisModule_ReplyWithNull(ctx);
+    }
+
+    if (rtype != REDISMODULE_REPLY_STRING) {
+        /* This should not happen with GET, but be defensive */
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC get: unexpected reply type from GET");
+    }
+
+    /* Extract blob returned by GET */
+    size_t rlen;
+    const char *rptr = RedisModule_CallReplyStringPtr(reply, &rlen);
+
+    if (!rptr) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC get: failed to read GET reply");
+    }
+
+    /* Decompress if needed, based on MC/DC header */
+    size_t klen;
+    const char *kptr = RedisModule_StringPtrLen(argv[1], &klen);
+
+    char *out = NULL;
+
+    size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+    if (outlen < 0 || !out) {
+        if (out) free(out);
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC get: decompression failed");
+    }
+
+    /* Return uncompressed payload as bulk string */
+    RedisModule_ReplyWithStringBuffer(ctx, out, outlen);
+    // free after malloc
+    free(out);
+    return REDISMODULE_OK;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Registration helper                                                       */
 /* ------------------------------------------------------------------------- */
@@ -360,6 +424,13 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
     {
         return REDISMODULE_ERR;
     }
-
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.getdel",
+            MCDC_GetDelCommand,
+            "write",   /* modifies keyspace */
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
     return REDISMODULE_OK;
 }
