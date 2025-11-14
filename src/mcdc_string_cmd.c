@@ -829,6 +829,31 @@ int MCDC_GetSetCommand(RedisModuleCtx *ctx,
     free(out);
     return REDISMODULE_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* mcdc.cstrlen key  - compressed value length   (one can use STRLEN)        */
+/* ------------------------------------------------------------------------- */
+
+int MCDC_CstrlenCommand(RedisModuleCtx *ctx,
+                    RedisModuleString **argv,
+                    int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 2) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC cstrlen: wrong number of arguments (expected: mcdc.cstrlen key)");
+    }
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "STRLEN", "s", argv[1]);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC cstrlen: underlying STRLEN failed");
+    }
+    return RedisModule_ReplyWithCallReply(ctx, reply);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Registration helper                                                       */
 /* ------------------------------------------------------------------------- */
@@ -905,5 +930,15 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
     {
         return REDISMODULE_ERR;
     }
+    
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.cstrlen",
+            MCDC_CstrlenCommand,
+            "readonly",
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+    
     return REDISMODULE_OK;
 }
