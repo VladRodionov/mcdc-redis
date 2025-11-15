@@ -9,6 +9,7 @@
 #include "mcdc_admin_cmd.h"
 #include "mcdc_string_cmd.h"
 #include "mcdc_cmd_filter.h"
+#include "mcdc_role.h"
 
 
 static void MCDC_LogCwd(RedisModuleCtx *ctx) {
@@ -32,6 +33,14 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
 
     MCDC_RegisterAdminCommands(ctx);
     MCDC_RegisterStringCommands(ctx);
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.role",
+            MCDC_RoleDebugCommand,
+            "readonly",
+            0, 0, 0) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
     
     /* Load and parse config directly */
     if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)

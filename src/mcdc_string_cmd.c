@@ -5,6 +5,7 @@
 
 #include "redismodule.h"
 #include "mcdc_string_cmd.h"
+#include "mcdc_role.h"
 #include "mcdc_compression.h"
 
 static inline void write_u16(char *dst, int v)
@@ -121,6 +122,20 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
             ctx, "ERR MCDC set: failed to read arguments");
     }
 
+    /* ---------------------------------------------------------
+      * Replica or replicated/AOF command → NO compression.
+      * Just forward all args (key, value, options…) to SET.
+      * --------------------------------------------------------- */
+    if (!MCDC_ShouldCompress(ctx)) {
+         /* argv[1..argc-1] are exactly: key, value, [options…] */
+         RedisModuleCallReply *reply =
+             RedisModule_Call(ctx, "SET", "v", argv + 1, (size_t)(argc - 1));
+         if (!reply) {
+             return RedisModule_ReplyWithError(
+                 ctx, "ERR MCDC set: underlying SET failed");
+         }
+         return RedisModule_ReplyWithCallReply(ctx, reply);
+    }
     /* MC/DC sampling hook */
     mcdc_sample(kptr, klen, vptr, vlen);
 
@@ -196,9 +211,9 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
         set_argv[i - 1] = argv[i];  /* copy all options as-is */
     }
 
-    /* Call underlying Redis SET command with full options preserved */
+    /* Call underlying Redis SET command (! - for replication if enabled) with full options preserved */
     RedisModuleCallReply *reply =
-        RedisModule_Call(ctx, "SET", "v", set_argv, set_argc);
+        RedisModule_Call(ctx, "SET", "!v", set_argv, set_argc);
 
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
@@ -293,7 +308,20 @@ int MCDC_SetExCommand(RedisModuleCtx *ctx,
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC setex: failed to read arguments");
     }
-
+    /* ---------------------------------------------------------
+      * Replica or replicated/AOF command → NO compression.
+      * Just forward all args (key, value, options…) to SET.
+      * --------------------------------------------------------- */
+    if (!MCDC_ShouldCompress(ctx)) {
+        /* argv[1..argc-1] are exactly: key, value, [options…] */
+        RedisModuleCallReply *reply =
+            RedisModule_Call(ctx, "SETEX", "v", argv + 1, (size_t)(argc - 1));
+        if (!reply) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC set: underlying SETEX failed");
+        }
+        return RedisModule_ReplyWithCallReply(ctx, reply);
+    }
     /* MC/DC sampling hook */
     mcdc_sample(kptr, klen, vptr, vlen);
 
@@ -342,7 +370,7 @@ int MCDC_SetExCommand(RedisModuleCtx *ctx,
 
     /* Call underlying Redis SETEX command with full options preserved */
     RedisModuleCallReply *reply =
-        RedisModule_Call(ctx, "SETEX", "v", set_argv, set_argc);
+        RedisModule_Call(ctx, "SETEX", "!v", set_argv, set_argc);
 
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
@@ -377,7 +405,20 @@ int MCDC_PsetExCommand(RedisModuleCtx *ctx,
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC psetx: failed to read arguments");
     }
-
+    /* ---------------------------------------------------------
+      * Replica or replicated/AOF command → NO compression.
+      * Just forward all args (key, value, options…) to SET.
+      * --------------------------------------------------------- */
+    if (!MCDC_ShouldCompress(ctx)) {
+        /* argv[1..argc-1] are exactly: key, value, [options…] */
+        RedisModuleCallReply *reply =
+            RedisModule_Call(ctx, "PSETEX", "v", argv + 1, (size_t)(argc - 1));
+        if (!reply) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC set: underlying PSETEX failed");
+        }
+        return RedisModule_ReplyWithCallReply(ctx, reply);
+    }
     /* MC/DC sampling hook */
     mcdc_sample(kptr, klen, vptr, vlen);
 
@@ -426,7 +467,7 @@ int MCDC_PsetExCommand(RedisModuleCtx *ctx,
 
     /* Call underlying Redis SETEX command with full options preserved */
     RedisModuleCallReply *reply =
-        RedisModule_Call(ctx, "PSETEX", "v", set_argv, set_argc);
+        RedisModule_Call(ctx, "PSETEX", "!v", set_argv, set_argc);
 
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
@@ -462,7 +503,20 @@ int MCDC_SetNxCommand(RedisModuleCtx *ctx,
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC setnx: failed to read arguments");
     }
-
+    /* ---------------------------------------------------------
+      * Replica or replicated/AOF command → NO compression.
+      * Just forward all args (key, value, options…) to SET.
+      * --------------------------------------------------------- */
+    if (!MCDC_ShouldCompress(ctx)) {
+        /* argv[1..argc-1] are exactly: key, value, [options…] */
+        RedisModuleCallReply *reply =
+            RedisModule_Call(ctx, "SETNX", "v", argv + 1, (size_t)(argc - 1));
+        if (!reply) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC set: underlying SETNX failed");
+        }
+        return RedisModule_ReplyWithCallReply(ctx, reply);
+    }
     /* MC/DC sampling hook */
     mcdc_sample(kptr, klen, vptr, vlen);
 
@@ -502,7 +556,7 @@ int MCDC_SetNxCommand(RedisModuleCtx *ctx,
 
     /* Call underlying Redis SETNX command */
     RedisModuleCallReply *reply =
-        RedisModule_Call(ctx, "SETNX", "ss", argv[1], encoded);
+        RedisModule_Call(ctx, "SETNX", "!ss", argv[1], encoded);
 
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
@@ -741,7 +795,20 @@ int MCDC_GetSetCommand(RedisModuleCtx *ctx,
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC getset: failed to read arguments");
     }
-
+    /* ---------------------------------------------------------
+      * Replica or replicated/AOF command → NO compression.
+      * Just forward all args (key, value, options…) to SET.
+      * --------------------------------------------------------- */
+    if (!MCDC_ShouldCompress(ctx)) {
+        /* argv[1..argc-1] are exactly: key, value, [options…] */
+        RedisModuleCallReply *reply =
+            RedisModule_Call(ctx, "GETSET", "v", argv + 1, (size_t)(argc - 1));
+        if (!reply) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC set: underlying GETSET failed");
+        }
+        return RedisModule_ReplyWithCallReply(ctx, reply);
+    }
     /* MC/DC sampling hook */
     mcdc_sample(kptr, klen, vptr, vlen);
 
@@ -782,7 +849,7 @@ int MCDC_GetSetCommand(RedisModuleCtx *ctx,
      *   GETSET key encoded_value
      */
     RedisModuleCallReply *reply =
-        RedisModule_Call(ctx, "GETSET", "ss", argv[1], encoded);
+        RedisModule_Call(ctx, "GETSET", "!ss", argv[1], encoded);
 
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
@@ -1075,6 +1142,20 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
     int n_pairs   = (argc - 1) / 2;
     int mset_argc = argc - 1;  /* everything except module command name */
 
+    /* ---------------------------------------------------------
+      * Replica or replicated/AOF command → NO compression.
+      * Just forward all args (key, value, options…) to SET.
+      * --------------------------------------------------------- */
+    if (!MCDC_ShouldCompress(ctx)) {
+        /* argv[1..argc-1] are exactly: key, value, [options…] */
+        RedisModuleCallReply *reply =
+            RedisModule_Call(ctx, "MSET", "v", argv + 1, (size_t)(argc - 1));
+        if (!reply) {
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC set: underlying SET failed");
+        }
+        return RedisModule_ReplyWithCallReply(ctx, reply);
+    }
     /* We’ll build argv for underlying MSET:
      *   MSET key1 enc_v1 key2 enc_v2 ...
      */
@@ -1147,7 +1228,7 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
 
     /* Call underlying Redis MSET with all encoded pairs */
     RedisModuleCallReply *reply =
-        RedisModule_Call(ctx, "MSET", "v", mset_argv, mset_argc);
+        RedisModule_Call(ctx, "MSET", "!v", mset_argv, mset_argc);
 
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
