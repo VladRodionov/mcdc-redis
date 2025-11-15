@@ -8,6 +8,7 @@
 #include "mcdc_compression.h"
 #include "mcdc_admin_cmd.h"
 #include "mcdc_string_cmd.h"
+#include "mcdc_cmd_filter.h"
 
 
 static void MCDC_LogCwd(RedisModuleCtx *ctx) {
@@ -35,15 +36,17 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     /* Load and parse config directly */
     if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)
          return REDISMODULE_ERR;
-    
     MCDC_LogCwd(ctx);
-    
     /* Initialize module components */
     //TODO: error handling
     mcdc_init();
-    
+    if (MCDC_RegisterCommandFilter(ctx) == REDISMODULE_ERR) {
+        RedisModule_Log(ctx, "warning",
+                        "MC/DC: failed to register command filter");
+        return REDISMODULE_ERR;
+    }
     RedisModule_Log(ctx, "notice",
-           "MC/DC module loaded successfully");
+                    "MC/DC Redis module loaded with command filters");
     return REDISMODULE_OK;
 }
 
