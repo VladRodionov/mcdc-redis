@@ -8,6 +8,7 @@
 #include "mcdc_compression.h"
 #include "mcdc_admin_cmd.h"
 #include "mcdc_string_cmd.h"
+#include "mcdc_string_unsupported_cmd.h"
 #include "mcdc_cmd_filter.h"
 #include "mcdc_role.h"
 
@@ -33,6 +34,7 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
 
     MCDC_RegisterAdminCommands(ctx);
     MCDC_RegisterStringCommands(ctx);
+    MCDC_RegisterUnsupportedStringCommands(ctx);
     if (RedisModule_CreateCommand(ctx,
             "mcdc.role",
             MCDC_RoleDebugCommand,

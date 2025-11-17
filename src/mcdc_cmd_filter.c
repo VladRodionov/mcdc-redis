@@ -14,7 +14,7 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     const char *cstr = RedisModule_StringPtrLen(cmd, &clen);
     if (!cstr || clen == 0) return;
 
-    // We only care about String commands for now
+    // We only care about String + bitmap commands for now
     enum {
         CMD_UNKNOWN = 0,
         CMD_GET,
@@ -27,36 +27,71 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
         CMD_GETDEL,
         CMD_MGET,
         CMD_MSET,
-        CMD_STRLEN
+        CMD_STRLEN,
+        // Unsupported string commands we wrap:
+        CMD_APPEND,
+        CMD_GETRANGE,
+        CMD_SETRANGE,
+        // Bitmap family:
+        CMD_SETBIT,
+        CMD_GETBIT,
+        CMD_BITCOUNT,
+        CMD_BITPOS,
+        CMD_BITOP,
+        CMD_BITFIELD,
+        CMD_BITFIELD_RO
     } which = CMD_UNKNOWN;
 
-    if      (clen == 3  && !strncasecmp(cstr, "GET", 3))     which = CMD_GET;
-    else if (clen == 3  && !strncasecmp(cstr, "SET", 3))     which = CMD_SET;
-    else if (clen == 4  && !strncasecmp(cstr, "MGET", 4))    which = CMD_MGET;
-    else if (clen == 4  && !strncasecmp(cstr, "MSET", 4))    which = CMD_MSET;
-    else if (clen == 5  && !strncasecmp(cstr, "GETEX", 5))   which = CMD_GETEX;
-    else if (clen == 5  && !strncasecmp(cstr, "SETEX", 5))   which = CMD_SETEX;
-    else if (clen == 5  && !strncasecmp(cstr, "SETNX", 5))   which = CMD_SETNX;
-    else if (clen == 6  && !strncasecmp(cstr, "PSETEX", 6))   which = CMD_PSETEX;
-    else if (clen == 6  && !strncasecmp(cstr, "GETDEL", 6))   which = CMD_GETDEL;
-    else if (clen == 6  && !strncasecmp(cstr, "GETSET", 6))  which = CMD_GETSET;
-    else if (clen == 6  && !strncasecmp(cstr, "STRLEN", 6))  which = CMD_STRLEN;
+    if      (clen == 3  && !strncasecmp(cstr, "GET", 3))        which = CMD_GET;
+    else if (clen == 3  && !strncasecmp(cstr, "SET", 3))        which = CMD_SET;
+    else if (clen == 4  && !strncasecmp(cstr, "MGET", 4))       which = CMD_MGET;   // (defensive, usually 4)
+    else if (clen == 4  && !strncasecmp(cstr, "MGET", 4))       which = CMD_MGET;
+    else if (clen == 4  && !strncasecmp(cstr, "MSET", 4))       which = CMD_MSET;
+    else if (clen == 5  && !strncasecmp(cstr, "GETEX", 5))      which = CMD_GETEX;
+    else if (clen == 5  && !strncasecmp(cstr, "SETEX", 5))      which = CMD_SETEX;
+    else if (clen == 5  && !strncasecmp(cstr, "SETNX", 5))      which = CMD_SETNX;
+    else if (clen == 6  && !strncasecmp(cstr, "PSETEX", 6))     which = CMD_PSETEX;
+    else if (clen == 6  && !strncasecmp(cstr, "GETDEL", 6))     which = CMD_GETDEL;
+    else if (clen == 6  && !strncasecmp(cstr, "GETSET", 6))     which = CMD_GETSET;
+    else if (clen == 6  && !strncasecmp(cstr, "STRLEN", 6))     which = CMD_STRLEN;
+
+    // Unsupported string commands:
+    else if (clen == 6  && !strncasecmp(cstr, "APPEND", 6))     which = CMD_APPEND;
+    else if (clen == 8  && !strncasecmp(cstr, "GETRANGE", 8))   which = CMD_GETRANGE;
+    else if (clen == 8  && !strncasecmp(cstr, "SETRANGE", 8))   which = CMD_SETRANGE;
     else return; // other commands are untouched
 
     /* Find the first key argument position for each command.
-     *   GET key                 -> key at argv[1]
-     *   SET key value ...       -> key at argv[1]
-     *   GETEX key [...]         -> key at argv[1]
-     *   GETSET key value        -> key at argv[1]
-     *   STRLEN key              -> key at argv[1]
-     *   MGET key [key ...]      -> first key at argv[1]
-     *   MSET key value [..]     -> first key at argv[1]
+     *   GET key                      -> key at argv[1]
+     *   SET key value ...            -> key at argv[1]
+     *   GETEX key [...]              -> key at argv[1]
+     *   GETSET key value             -> key at argv[1]
+     *   GETDEL key                   -> key at argv[1]
+     *   STRLEN key                   -> key at argv[1]
+     *   MGET key [key ...]           -> first key at argv[1]
+     *   MSET key value [..]          -> first key at argv[1]
      *
-     * For MGET/MSET we only look at the *first* key; if it's in MC/DC
-     * namespace we treat the whole command as MC/DC.
+     * Unsupported string:
+     *   APPEND key value             -> key at argv[1]
+     *   GETRANGE key start end       -> key at argv[1]
+     *   SETRANGE key offset value    -> key at argv[1]
+     *
+     * For multi-key commands (MGET/MSET/BITOP) we only look at one key; if
+     * it is in MC/DC namespace we treat the whole command as MC/DC.
      */
-    if (argc < 2) return;
-    RedisModuleString *keystr = RedisModule_CommandFilterArgGet(fctx, 1);
+    int key_index = 1;
+    switch (which) {
+    case CMD_BITOP:
+        key_index = 3; // first source key
+        break;
+    default:
+        key_index = 1;
+        break;
+    }
+
+    if (argc <= key_index) return;
+
+    RedisModuleString *keystr = RedisModule_CommandFilterArgGet(fctx, key_index);
     size_t klen = 0;
     const char *kptr = RedisModule_StringPtrLen(keystr, &klen);
     if (!kptr) return;
@@ -71,31 +106,33 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     size_t newlen = 0;
 
     switch (which) {
-    case CMD_GET:    newname = "mcdc.get";    newlen = 8; break;
-    case CMD_SET:    newname = "mcdc.set";    newlen = 8; break;
-    case CMD_GETEX:  newname = "mcdc.getex";  newlen = 10; break;
-    case CMD_GETSET: newname = "mcdc.getset"; newlen = 11; break;
-    case CMD_MGET:   newname = "mcdc.mget";   newlen = 9; break;
-    case CMD_MSET:   newname = "mcdc.mset";   newlen = 9; break;
-    case CMD_STRLEN: newname = "mcdc.strlen"; newlen = 11; break;
-    case CMD_SETEX: newname = "mcdc.setex"; newlen = 10; break;
-    case CMD_SETNX: newname = "mcdc.setnx"; newlen = 10; break;
-    case CMD_PSETEX: newname = "mcdc.psetex"; newlen = 11; break;
-    case CMD_GETDEL: newname = "mcdc.getdel"; newlen = 11; break;
+    case CMD_GET:         newname = "mcdc.get";         newlen = sizeof("mcdc.get") - 1;         break;
+    case CMD_SET:         newname = "mcdc.set";         newlen = sizeof("mcdc.set") - 1;         break;
+    case CMD_GETEX:       newname = "mcdc.getex";       newlen = sizeof("mcdc.getex") - 1;       break;
+    case CMD_GETSET:      newname = "mcdc.getset";      newlen = sizeof("mcdc.getset") - 1;      break;
+    case CMD_GETDEL:      newname = "mcdc.getdel";      newlen = sizeof("mcdc.getdel") - 1;      break;
+    case CMD_MGET:        newname = "mcdc.mget";        newlen = sizeof("mcdc.mget") - 1;        break;
+    case CMD_MSET:        newname = "mcdc.mset";        newlen = sizeof("mcdc.mset") - 1;        break;
+    case CMD_STRLEN:      newname = "mcdc.strlen";      newlen = sizeof("mcdc.strlen") - 1;      break;
+    case CMD_SETEX:       newname = "mcdc.setex";       newlen = sizeof("mcdc.setex") - 1;       break;
+    case CMD_SETNX:       newname = "mcdc.setnx";       newlen = sizeof("mcdc.setnx") - 1;       break;
+    case CMD_PSETEX:      newname = "mcdc.psetex";      newlen = sizeof("mcdc.psetex") - 1;      break;
+
+    // Unsupported string mapped to module commands:
+    case CMD_APPEND:      newname = "mcdc.append";      newlen = sizeof("mcdc.append") - 1;      break;
+    case CMD_GETRANGE:    newname = "mcdc.getrange";    newlen = sizeof("mcdc.getrange") - 1;    break;
+    case CMD_SETRANGE:    newname = "mcdc.setrange";    newlen = sizeof("mcdc.setrange") - 1;    break;
+
     default:
         return;
     }
 
-    // We can create a RedisModuleString with ctx = NULL for use outside
-    // any normal module context (filter is such a case).
     RedisModuleString *newcmd =
         RedisModule_CreateString(NULL, newname, newlen);
 
     // Replace argv[0] (command name) with our module command
     RedisModule_CommandFilterArgReplace(fctx, 0, newcmd);
-
-    // NOTE: We must NOT free newcmd here. Redis will manage it for
-    // the duration of this command execution.
+    // Do not free newcmd: Redis will manage it for this command.
 }
 
 /* Called from OnLoad */

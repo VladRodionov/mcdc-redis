@@ -86,7 +86,9 @@ SRC = \
   src/mcdc_admin_cmd.c \
   src/mcdc_string_cmd.c \
   src/mcdc_cmd_filter.c \
-  src/mcdc_role.c
+  src/mcdc_role.c \
+  src/mcdc_module_utils.c \
+  src/mcdc_string_unsupported_cmd.c
 
 OBJ    = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRC))
 TARGET = $(BUILD_DIR)/mcdc.$(SHLIB_EXT)

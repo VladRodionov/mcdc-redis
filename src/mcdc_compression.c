@@ -63,6 +63,8 @@
 #include "mcdc_dict_pool.h"
 #include "mcdc_eff_atomic.h"
 #include "mcdc_sampling.h"
+#include "redismodule.h"
+#include "mcdc_module_utils.h"
 
 
 static __thread tls_cache_t tls; /* zero-initialised */
@@ -915,6 +917,15 @@ ssize_t mcdc_decompress(const void *src,
     return (ssize_t) out_sz;
 }
 
+inline bool mcdc_is_compressed (const char *v, size_t vsz){
+    size_t expect = ZSTD_getFrameContentSize(v, vsz);
+    if (expect == ZSTD_CONTENTSIZE_ERROR ||
+        expect == ZSTD_CONTENTSIZE_UNKNOWN) {
+        return false;
+    }
+    return true;
+}
+
 /* Return values
  *   >0  : decompressed length
  *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
@@ -926,6 +937,7 @@ ssize_t mcdc_maybe_decompress(const char *value,
 
     /* 1. Statistics */
     mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_key(key, key_sz);
+
     if(stats) atomic_inc64(&stats->reads_total, 1);
 
     /* 2. Dictionary lookup --------------------------------------- */
@@ -962,7 +974,6 @@ ssize_t mcdc_maybe_decompress(const char *value,
 
     /* 4. Decompress ---------------------------------------------- */
     ssize_t dec = mcdc_decompress(value, value_sz, dst, expect, did);
-
     if (dec < 0) {
         if(ctx->cfg->verbose > 0)
         /* ZSTD error */
