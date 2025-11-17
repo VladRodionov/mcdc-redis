@@ -207,6 +207,9 @@ int mcdc_config_sanity_check(void) {
     mcdc_cfg_t *cfg = &g_cfg;
     if (!cfg) return -1;
 
+    if(cfg->min_comp_size < MCDC_HARD_MIN_TO_COMPRESS) {
+        cfg->min_comp_size = MCDC_HARD_MIN_TO_COMPRESS;
+    }
     if (!cfg->enable_comp) return 0;
     bool ok = true;
 

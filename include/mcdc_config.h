@@ -101,6 +101,7 @@ typedef struct {
 
 #define MCDC_DEFAULT_COMPRESS_KEYS          false
 #define MCDC_DEFAULT_VERBOSE                0
+#define MCDC_HARD_MIN_TO_COMPRESS           32
 
 /* --------------------------------------------------------------------
  * parse_mcdc_config()
