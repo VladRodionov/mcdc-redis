@@ -11,6 +11,9 @@
 #include "mcdc_string_unsupported_cmd.h"
 #include "mcdc_cmd_filter.h"
 #include "mcdc_role.h"
+#include "mcdc_mget_async.h"
+#include "mcdc_mset_async.h"
+#include "mcdc_thread_pool.h"
 
 
 static void MCDC_LogCwd(RedisModuleCtx *ctx) {
@@ -35,14 +38,10 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     MCDC_RegisterAdminCommands(ctx);
     MCDC_RegisterStringCommands(ctx);
     MCDC_RegisterUnsupportedStringCommands(ctx);
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.role",
-            MCDC_RoleDebugCommand,
-            "readonly",
-            0, 0, 0) == REDISMODULE_ERR)
-    {
-        return REDISMODULE_ERR;
-    }
+    MCDC_RegisterRoleDebugCommand(ctx);
+    MCDC_RegisterMGetAsyncCommand(ctx);
+    MCDC_RegisterMSetAsyncCommand(ctx);
+
     
     /* Load and parse config directly */
     if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)
@@ -58,6 +57,15 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     }
     RedisModule_Log(ctx, "notice",
                     "MC/DC Redis module loaded with command filters");
+    mcdc_cfg_t *cfg = mcdc_config_get();
+    if (cfg->async_cmd_enabled){
+        int num_threads = cfg->async_thread_pool_size;
+        int queue_size = cfg->async_queue_size;
+        MCDC_ThreadPoolInit(num_threads, queue_size);
+        RedisModule_Log(ctx, "notice",
+                        "MC/DC Redis module started thread pool: %d threads, queue_size=%d", num_threads, queue_size);
+    }
+    
     return REDISMODULE_OK;
 }
 

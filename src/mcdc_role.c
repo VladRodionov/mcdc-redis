@@ -69,3 +69,15 @@ int MCDC_RoleDebugCommand(RedisModuleCtx *ctx,
 
     return RedisModule_ReplyWithSimpleString(ctx, buf);
 }
+
+int MCDC_RegisterRoleDebugCommand(RedisModuleCtx *ctx) {
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.role",
+            MCDC_RoleDebugCommand,
+            "readonly",
+            0, 0, 0) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+    return REDISMODULE_OK;
+}

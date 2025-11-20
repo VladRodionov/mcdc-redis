@@ -68,6 +68,10 @@ typedef struct {
     char    *spool_dir;             // path to the spool directory
     size_t   spool_max_bytes;       // cap bytes to collect
     int verbose;                    // logging level, default - 0 (minimum), its memcached style
+    // Additional for Redis async commands support
+    bool     async_cmd_enabled;
+    int      async_thread_pool_size;
+    int      async_queue_size;
 } mcdc_cfg_t;
 
 
@@ -102,6 +106,10 @@ typedef struct {
 #define MCDC_DEFAULT_COMPRESS_KEYS          false
 #define MCDC_DEFAULT_VERBOSE                0
 #define MCDC_HARD_MIN_TO_COMPRESS           32
+#define MCDC_DEFAULT_ASYNC_CMD_ENABLED      false;
+#define MCDC_DEFAULT_ASYNC_THREAD_POOL_SIZE 4
+#define MCDC_DEFAULT_ASYNC_QUEUE_SIZE       32
+
 
 /* --------------------------------------------------------------------
  * parse_mcdc_config()

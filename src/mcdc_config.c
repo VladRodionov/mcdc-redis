@@ -187,6 +187,9 @@ void mcdc_init_default_config(void) {
     g_cfg.spool_max_bytes       = MCDC_DEFAULT_SPOOL_MAX_BYTES;
     g_cfg.compress_keys         = MCDC_DEFAULT_COMPRESS_KEYS;
     g_cfg.verbose               = MCDC_DEFAULT_VERBOSE;
+    g_cfg.async_cmd_enabled     = MCDC_DEFAULT_ASYNC_CMD_ENABLED;
+    g_cfg.async_thread_pool_size= MCDC_DEFAULT_ASYNC_THREAD_POOL_SIZE;
+    g_cfg.async_queue_size      = MCDC_DEFAULT_ASYNC_QUEUE_SIZE;
 
     inited = true;
 }
@@ -349,6 +352,15 @@ int parse_mcdc_config(const char *path)
         } else if (strcasecmp(key, "compress_keys") == 0) {
             /* legacy: ignored in MC/DC; accept to avoid breaking configs */
             fprintf(stderr, "%s:%d: NOTE: 'compress_keys' ignored\n", path, ln);
+        } else if (strcasecmp(key, "enable_async_cmd") == 0) {
+            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad enable_async_cmd '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.async_cmd_enabled = b;
+        } else if (strcasecmp(key, "async_thread_pool_size") == 0) {
+            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad async_thread_pool_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.async_thread_pool_size = (int)v;
+        } else if (strcasecmp(key, "async_queue_size") == 0) {
+            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad async_queue_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.async_queue_size = (int)v;
         } else {
             fprintf(stderr, "%s:%d: unknown key '%s'\n", path, ln, key);
             /* not fatal; continue */

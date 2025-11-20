@@ -1036,6 +1036,12 @@ int MCDC_MGetCommand(RedisModuleCtx *ctx,
              * delete key and return null
              */
             if (out) free(out);
+            ssize_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+            RedisModule_Log(ctx, "warning",
+                    "<mcdc> compression FAILED key='%.*s' value='%.*s' value-length=%zu rc=%zd",
+                    (int)klen, kptr,
+                    (int)rlen, rptr, rlen,
+                    outlen);
             MCDC_DelKey(ctx, argv[1]);
             /* Behave like GET: return null bulk string */
             RedisModule_ReplyWithNull(ctx);
@@ -1115,6 +1121,11 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
         char *stored = NULL;
         int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
         if (slen < 0) {
+            RedisModule_Log(ctx, "warning",
+                    "<mcdc> compression FAILED key='%.*s' value='%.*s' value-length=%zu rc=%d",
+                    (int)klen, kptr,
+                    (int)vlen, vptr, vlen,
+                    slen);
             return RedisModule_ReplyWithError(
                 ctx, "ERR MCDC mset: compression failed");
         }

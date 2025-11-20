@@ -819,7 +819,7 @@ ssize_t mcdc_maybe_compress(const void *src, size_t src_sz, const void *key, siz
         return 0;
     }
     /* 0.  sanity checks ------------------------------------------ */
-    if (!ctx || !src || src_sz == 0 || !dst || !dict_id_out)
+    if (!ctx || !src || !dst || !dict_id_out)
         return -EINVAL;
     /* Statistics */
     mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_key((const char *) key, key_sz);
@@ -847,8 +847,9 @@ ssize_t mcdc_maybe_compress(const void *src, size_t src_sz, const void *key, siz
     void *dst_buf = tls.scratch;
     /* Add */
     
-    CHECK_Z(ZSTD_CCtx_refCDict(tls.cctx, cd));
-
+    if (cd) {
+        CHECK_Z(ZSTD_CCtx_refCDict(tls.cctx, cd));
+    }
     /* 3.  compress ----------------------------------------------- */
     size_t csz = ZSTD_compress2(tls.cctx, (char *)dst_buf + did_room, bound, src, src_sz);
     if (ZSTD_isError(csz)) {

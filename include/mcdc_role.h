@@ -64,4 +64,6 @@ int MCDC_RoleDebugCommand(RedisModuleCtx *ctx,
                           RedisModuleString **argv,
                           int argc);
 
+int MCDC_RegisterRoleDebugCommand(RedisModuleCtx *ctx);
+
 #endif /* MCDC_ROLE_H */

@@ -1,6 +1,7 @@
 // src/mcdc_cmd_filter.c
 #include "redismodule.h"
 #include "mcdc_cmd_filter.h"
+#include "mcdc_config.h"
 #include <strings.h>  // for strncasecmp
 
 static RedisModuleCommandFilter *g_mcdc_filter = NULL;
@@ -104,6 +105,9 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     // We’re in: rewrite command name to mcdc.* version
     const char *newname = NULL;
     size_t newlen = 0;
+    mcdc_cfg_t *cfg = mcdc_config_get();
+    char *mget_cmd = cfg->async_cmd_enabled? "mcdc.mgetasync": "mcdc.mget";
+    char *mset_cmd = cfg->async_cmd_enabled? "mcdc.msetasync": "mcdc.mset";
 
     switch (which) {
     case CMD_GET:         newname = "mcdc.get";         newlen = sizeof("mcdc.get") - 1;         break;
@@ -111,8 +115,8 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     case CMD_GETEX:       newname = "mcdc.getex";       newlen = sizeof("mcdc.getex") - 1;       break;
     case CMD_GETSET:      newname = "mcdc.getset";      newlen = sizeof("mcdc.getset") - 1;      break;
     case CMD_GETDEL:      newname = "mcdc.getdel";      newlen = sizeof("mcdc.getdel") - 1;      break;
-    case CMD_MGET:        newname = "mcdc.mget";        newlen = sizeof("mcdc.mget") - 1;        break;
-    case CMD_MSET:        newname = "mcdc.mset";        newlen = sizeof("mcdc.mset") - 1;        break;
+    case CMD_MGET:        newname = mget_cmd;           newlen = strlen(mget_cmd);               break;
+    case CMD_MSET:        newname = mset_cmd;           newlen = strlen(mset_cmd);               break;
     case CMD_STRLEN:      newname = "mcdc.strlen";      newlen = sizeof("mcdc.strlen") - 1;      break;
     case CMD_SETEX:       newname = "mcdc.setex";       newlen = sizeof("mcdc.setex") - 1;       break;
     case CMD_SETNX:       newname = "mcdc.setnx";       newlen = sizeof("mcdc.setnx") - 1;       break;

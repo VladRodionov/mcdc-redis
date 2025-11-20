@@ -87,7 +87,7 @@ size_t mcdc_encode_value(const char *key, size_t klen,
         /* error */
         return csz;
     }
-    if (csz == 0 && !outbuf) {
+    if (csz == 0 && *outbuf) {
         /* Store uncompressed */
         memcpy(*outbuf, value, vlen);
         return vlen;
