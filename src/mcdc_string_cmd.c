@@ -1036,7 +1036,6 @@ int MCDC_MGetCommand(RedisModuleCtx *ctx,
              * delete key and return null
              */
             if (out) free(out);
-            ssize_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
             RedisModule_Log(ctx, "warning",
                     "<mcdc> compression FAILED key='%.*s' value='%.*s' value-length=%zu rc=%zd",
                     (int)klen, kptr,

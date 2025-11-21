@@ -380,7 +380,10 @@ static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
             "sample_p: %.6f\r\n"
             "sample_window_duration: %d\r\n"
             "spool_dir: %s\r\n"
-            "spool_max_bytes: %zu",
+            "spool_max_bytes: %zu\r\n"
+            "enable_async_cmd: %s\r\n"
+            "async_thread_pool_size: %d\r\n"
+            "async_queue_size: %d",
             b2s(c->enable_comp),
             b2s(c->enable_dict),
             dict_dir,
@@ -402,7 +405,10 @@ static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
             c->sample_p,
             c->sample_window_duration,
             spool_dir,
-            c->spool_max_bytes
+            c->spool_max_bytes,
+            b2s(c->async_cmd_enabled),
+            c->async_thread_pool_size,
+            c->async_queue_size
     );
     return n;
 }
@@ -438,7 +444,10 @@ static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
             "\"sample_p\": %.6f,\r\n"
             "\"sample_window_duration\": %d,\r\n"
             "\"spool_dir\": \"%s\",\r\n"
-            "\"spool_max_bytes\": %zu\r\n"
+            "\"spool_max_bytes\": %zu,\r\n"
+            "\"enable_async_cmd\": %s,\r\n"
+            "\"async_thread_pool_size\": %d,\r\n"
+            "\"async_queue_size\": %d\r\n"
             "}",
             b2s(c->enable_comp),
             b2s(c->enable_dict),
@@ -461,7 +470,10 @@ static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
             c->sample_p,
             c->sample_window_duration,
             spool_dir,
-            c->spool_max_bytes
+            c->spool_max_bytes,
+            b2s(c->async_cmd_enabled),
+            c->async_thread_pool_size,
+            c->async_queue_size
     );
     return n;
 }
