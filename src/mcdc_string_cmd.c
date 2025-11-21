@@ -1179,25 +1179,25 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
 
 int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
 {
-    if (RedisModule_CreateCommand(ctx, "mcdc.set", MCDC_SetCommand, "write",
+    if (RedisModule_CreateCommand(ctx, "mcdc.set", MCDC_SetCommand, "write deny-oom",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
 
-    if (RedisModule_CreateCommand(ctx, "mcdc.setnx", MCDC_SetNxCommand, "write",
+    if (RedisModule_CreateCommand(ctx, "mcdc.setnx", MCDC_SetNxCommand, "write deny-oom",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx, "mcdc.setex", MCDC_SetExCommand, "write",
+    if (RedisModule_CreateCommand(ctx, "mcdc.setex", MCDC_SetExCommand, "write deny-oom",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
 
-    if (RedisModule_CreateCommand(ctx, "mcdc.psetex", MCDC_PsetExCommand, "write",
+    if (RedisModule_CreateCommand(ctx, "mcdc.psetex", MCDC_PsetExCommand, "write deny-oom",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
@@ -1208,19 +1208,19 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
     {
         return REDISMODULE_ERR;
     }
-    if (RedisModule_CreateCommand(ctx, "mcdc.getdel", MCDC_GetDelCommand, "write",
+    if (RedisModule_CreateCommand(ctx, "mcdc.getdel", MCDC_GetDelCommand, "write deny-oom",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx, "mcdc.getex", MCDC_GetExCommand, "write",
+    if (RedisModule_CreateCommand(ctx, "mcdc.getex", MCDC_GetExCommand, "write deny-oom",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx, "mcdc.getset", MCDC_GetSetCommand, "write",
+    if (RedisModule_CreateCommand(ctx, "mcdc.getset", MCDC_GetSetCommand, "write deny-oom",
             1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
@@ -1243,7 +1243,7 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx, "mcdc.mset", MCDC_MSetCommand, "write",
+    if (RedisModule_CreateCommand(ctx, "mcdc.mset", MCDC_MSetCommand, "write deny-oom",
             1, -1, 2) == REDISMODULE_ERR)  /* keys: argv[1], argv[3], ..., step=2 */
     {
         return REDISMODULE_ERR;
