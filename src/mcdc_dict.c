@@ -81,6 +81,7 @@
 #include "mcdc_utils.h"
 #include "mcdc_dict_pool.h"
 #include "mcdc_stats.h"
+#include "mcdc_log.h"
 
 
 /* ----- manifest parsing ----- */
@@ -679,7 +680,7 @@ mcdc_table_t *mcdc_scan_dict_dir(const char *dir,
                 set_err(err_out, "mcdc_scan_dict_dir: dict load failed. Check the server's log for details");
             }
             /* If load fails, retire and persist so FS remains the truth, log error even if verbose = 1 */
-            fprintf(stderr, "[mcz-scan-dict-dir] failed to load %s", m->dict_path);
+            mcdc_log(MCDC_LOG_ERROR, "[mcz-scan-dict-dir] failed to load %s", m->dict_path);
             mcdc_mark_dict_retired(m, now, err_out);
         }
     }

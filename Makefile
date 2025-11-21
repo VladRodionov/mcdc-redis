@@ -91,7 +91,9 @@ SRC = \
   src/mcdc_thread_pool.c \
   src/mcdc_mset_async2.c \
   src/mcdc_hash_cmd.c \
-  src/mcdc_hash_async.c	
+  src/mcdc_hash_async.c \
+  src/mcdc_log.c \
+  src/mcdc_module_log.c  
 
 OBJ    = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRC))
 TARGET = $(BUILD_DIR)/mcdc.$(SHLIB_EXT)

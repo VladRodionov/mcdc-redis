@@ -44,6 +44,7 @@
 
 #include "mcdc_dict_pool.h"
 #include "mcdc_utils.h"
+#include "mcdc_log.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -173,6 +174,7 @@ int mcdc_dict_pool_retain_for_meta(mcdc_dict_meta_t *m, char **err_out)
 }
 
 void mcdc_dict_pool_release_for_meta(const mcdc_dict_meta_t *m, int32_t *ref_left, char **err_out) {
+    (char **)err_out;
     if (!m) return;
     char *key = make_key_from_meta(m);
     if (!key) return;

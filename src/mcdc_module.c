@@ -16,6 +16,7 @@
 #include "mcdc_mget_async.h"
 #include "mcdc_mset_async.h"
 #include "mcdc_thread_pool.h"
+#include "mcdc_module_log.h"
 
 
 static void MCDC_LogCwd(RedisModuleCtx *ctx) {
@@ -36,7 +37,9 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         == REDISMODULE_ERR) {
         return REDISMODULE_ERR;
     }
-
+    if (MCDC_ModuleInitLogger(ctx) != REDISMODULE_OK) {
+        return REDISMODULE_ERR;
+    }
     MCDC_RegisterAdminCommands(ctx);
     MCDC_RegisterStringCommands(ctx);
     MCDC_RegisterUnsupportedStringCommands(ctx);

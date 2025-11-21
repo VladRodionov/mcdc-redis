@@ -38,7 +38,7 @@
 #define _POSIX_C_SOURCE 200809L  // for setenv(), unsetenv(), realpath(), etc.
 #endif
 #include "mcdc_utils.h"
-
+#include "mcdc_log.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -301,7 +301,7 @@ void log_rate_limited(uint64_t interval_us, const char *fmt, ...) {
     /* we won the race → emit message */
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    mcdc_logv(MCDC_LOG_ERROR, fmt, ap);
     va_end(ap);
 }
 

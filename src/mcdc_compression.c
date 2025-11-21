@@ -65,6 +65,7 @@
 #include "mcdc_sampling.h"
 #include "redismodule.h"
 #include "mcdc_module_utils.h"
+#include "mcdc_log.h"
 
 
 static __thread tls_cache_t tls; /* zero-initialised */
@@ -87,7 +88,7 @@ static const mcdc_table_t *mcdc_current_table(void) {
 #define KB(x)  ((size_t)(x) << 10)
 #define MB(x)  ((size_t)(x) << 20)
 #define CHECK_Z(e) do { size_t _r = (e); \
-  if (ZSTD_isError(_r)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, ZSTD_getErrorName(_r));} \
+  if (ZSTD_isError(_r)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: %s\n", __FILE__, __LINE__, ZSTD_getErrorName(_r));} \
 } while (0)
 
 /* sane absolute limits */
@@ -113,7 +114,7 @@ static int attach_cfg(void)
         lvl = 3;
     if (lvl < ZSTD_LVL_MIN || lvl > ZSTD_LVL_MAX) {
         if (cfg->verbose > 1) {
-            fprintf(stderr,
+            mcdc_log(MCDC_LOG_ERROR,
                     "ERROR: zstd level %d out of range [%d..%d]\n",
                     lvl, ZSTD_LVL_MIN, ZSTD_LVL_MAX);
         }
@@ -130,7 +131,7 @@ static int attach_cfg(void)
     if (cfg->min_comp_size > cfg->max_comp_size ||
         cfg->max_comp_size > ZSTD_VALUE_MAX) {
         if (cfg->verbose > 1) {
-            fprintf(stderr,
+            mcdc_log(MCDC_LOG_ERROR,
                     "ERROR: invalid zstd min/max comp size (%zu / %zu)\n",
                     cfg->min_comp_size, cfg->max_comp_size);
         }
@@ -150,7 +151,7 @@ int mcdc_set_max_value_limit(size_t limit){
             cfg->max_comp_size = ZSTD_VALUE_MAX;
         }
         if (cfg->verbose > 1) {
-            fprintf(stderr,
+            mcdc_log(MCDC_LOG_ERROR,
                     "WARN: set maximum value size for compresion to %zu\n",
                     cfg->max_comp_size);
         }
@@ -158,7 +159,7 @@ int mcdc_set_max_value_limit(size_t limit){
     if (cfg->min_comp_size > cfg->max_comp_size ||
         cfg->max_comp_size > ZSTD_VALUE_MAX) {
         if (cfg->verbose > 1) {
-            fprintf(stderr,
+            mcdc_log(MCDC_LOG_ERROR,
                     "ERROR: invalid zstd min/max comp size (%zu / %zu)\n",
                     cfg->min_comp_size, cfg->max_comp_size);
         }
@@ -271,7 +272,7 @@ static int mcdc_load_dicts(void) {
     mcdc_table_t *tab = mcdc_scan_dict_dir(ctx->cfg->dict_dir, ctx->cfg->dict_retain_max,
                                          ctx->cfg->gc_quarantine_period, ctx->cfg->zstd_level, &err);
     if (err != NULL){
-        fprintf(stderr, "load dictionaries failed: %s\n", err ? err : "unknown error");
+        mcdc_log(MCDC_LOG_ERROR, "load dictionaries failed: %s\n", err ? err : "unknown error");
         st->rc = -ENOENT;
         snprintf(st->err, sizeof(st->err), "load dictionaries failed: %s\n", err ? err : "unknown error");
         free(err);
@@ -505,7 +506,7 @@ static void* trainer_main(void *arg) {
                 (void)mcdc_reload_dictionaries();
                 success = true;
             } else {
-                fprintf(stderr, "save failed: %s\n", err ? err : "unknown error");
+                mcdc_log(MCDC_LOG_ERROR, "save failed: %s\n", err ? err : "unknown error");
                 free(err);
                 if (stats) atomic_inc64(&stats->trainer_errs, 1);
             }
@@ -533,7 +534,7 @@ static void* trainer_main(void *arg) {
         }
         time_t finished = time(NULL);
         if (ctx->cfg->verbose > 1)
-            fprintf(stderr, "[mcdc] traininig time: %lds from start: %ld\n", finished - started_train, finished - started);
+            mcdc_log(MCDC_LOG_ERROR, "[mcdc] traininig time: %lds from start: %ld\n", finished - started_train, finished - started);
     }
 
     /* never reached */
@@ -613,6 +614,7 @@ int mcdc_init(void) {
     }
     /* ---------------  initialize sampler subsystem --------------------------*/
     mcdc_sampler_init(cfg->spool_dir, cfg->sample_p, cfg->sample_window_duration, cfg->spool_max_bytes);
+    mcdc_log(MCDC_LOG_INFO, "MC/DC Core initialized succesfully");
     return 0;
 }
 
@@ -945,7 +947,7 @@ ssize_t mcdc_maybe_decompress(const char *value,
     const ZSTD_DDict *dd = get_ddict_by_id(did);
     if (!dd && did > 0){
         if(ctx->cfg->verbose > 0)
-            fprintf(stderr, "[mcz] decompress: unknown dict id %u\n", did);
+            mcdc_log(MCDC_LOG_ERROR, "[mcz] decompress: unknown dict id %u\n", did);
         if(stats) atomic_inc64(&stats->dict_miss_errs, 1);
         //TODO: item must be deleted upstream
         return -EINVAL;                  /* unknown dict id */
@@ -955,7 +957,7 @@ ssize_t mcdc_maybe_decompress(const char *value,
     size_t expect = ZSTD_getFrameContentSize(value, value_sz);
     if (expect == ZSTD_CONTENTSIZE_ERROR){
         if(ctx->cfg->verbose > 0)
-            fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu)\n",
+            mcdc_log(MCDC_LOG_ERROR, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu)\n",
                cur_tid(), did, value_sz);
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
         return -EINVAL;
@@ -966,7 +968,7 @@ ssize_t mcdc_maybe_decompress(const char *value,
     void *dst = malloc(expect);
     if (!dst){
         if(ctx->cfg->verbose > 0)
-            fprintf(stderr,"[mcz] decompress: malloc(%zu) failed: %s\n",
+            mcdc_log(MCDC_LOG_ERROR,"[mcz] decompress: malloc(%zu) failed: %s\n",
                 expect, strerror(errno));
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
 
@@ -978,7 +980,7 @@ ssize_t mcdc_maybe_decompress(const char *value,
     if (dec < 0) {
         if(ctx->cfg->verbose > 0)
         /* ZSTD error */
-            fprintf(stderr, "[mcz decompress: mcdc_decompress() -> %zd (id=%u)\n",
+            mcdc_log(MCDC_LOG_ERROR, "[mcz decompress: mcdc_decompress() -> %zd (id=%u)\n",
                 dec, did);
         free(dst);
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
@@ -1014,7 +1016,7 @@ mcdc_reload_status_t *mcdc_reload_dictionaries(void)
     mcdc_table_t *newtab = mcdc_scan_dict_dir(dir, ctx->cfg->dict_retain_max,
                                          ctx->cfg->gc_quarantine_period, ctx->cfg->zstd_level, &err);
     if (err != NULL){
-        fprintf(stderr, "reload dictionaries failed: %s\n", err ? err : "unknown error");
+        mcdc_log(MCDC_LOG_ERROR, "reload dictionaries failed: %s\n", err ? err : "unknown error");
         st->rc = -ENOENT;
         snprintf(st->err, sizeof(st->err), "reload dictionaries failed: %s\n", err ? err : "unknown error");
         free(err);
