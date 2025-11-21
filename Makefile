@@ -87,9 +87,11 @@ SRC = \
   src/mcdc_role.c \
   src/mcdc_module_utils.c \
   src/mcdc_string_unsupported_cmd.c \
-  src/mcdc_mget_async.c \
+  src/mcdc_mget_async2.c \
   src/mcdc_thread_pool.c \
-  src/mcdc_mset_async.c
+  src/mcdc_mset_async2.c \
+  src/mcdc_hash_cmd.c \
+  src/mcdc_hash_async.c	
 
 OBJ    = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRC))
 TARGET = $(BUILD_DIR)/mcdc.$(SHLIB_EXT)

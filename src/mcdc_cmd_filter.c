@@ -15,9 +15,11 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     const char *cstr = RedisModule_StringPtrLen(cmd, &clen);
     if (!cstr || clen == 0) return;
 
-    // We only care about String + bitmap commands for now
+    // We only care about String + Hash + (later) bitmap commands
     enum {
         CMD_UNKNOWN = 0,
+
+        // String commands
         CMD_GET,
         CMD_SET,
         CMD_SETEX,
@@ -29,11 +31,26 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
         CMD_MGET,
         CMD_MSET,
         CMD_STRLEN,
+
         // Unsupported string commands we wrap:
         CMD_APPEND,
         CMD_GETRANGE,
         CMD_SETRANGE,
-        // Bitmap family:
+
+        // Hash commands
+        CMD_HGET,
+        CMD_HMGET,
+        CMD_HSET,
+        CMD_HSETNX,
+        CMD_HSETEX,
+        CMD_HGETEX,
+        CMD_HVALS,
+        CMD_HGETALL,
+        CMD_HSTRLEN,
+        CMD_HRANDFIELD,
+        CMD_HGETDEL,
+
+        // Bitmap family (not yet mapped here, but reserved):
         CMD_SETBIT,
         CMD_GETBIT,
         CMD_BITCOUNT,
@@ -43,9 +60,13 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
         CMD_BITFIELD_RO
     } which = CMD_UNKNOWN;
 
+    /* -------------------------------
+     * Command name classification
+     * ------------------------------- */
+
+    // String family
     if      (clen == 3  && !strncasecmp(cstr, "GET", 3))        which = CMD_GET;
     else if (clen == 3  && !strncasecmp(cstr, "SET", 3))        which = CMD_SET;
-    else if (clen == 4  && !strncasecmp(cstr, "MGET", 4))       which = CMD_MGET;   // (defensive, usually 4)
     else if (clen == 4  && !strncasecmp(cstr, "MGET", 4))       which = CMD_MGET;
     else if (clen == 4  && !strncasecmp(cstr, "MSET", 4))       which = CMD_MSET;
     else if (clen == 5  && !strncasecmp(cstr, "GETEX", 5))      which = CMD_GETEX;
@@ -56,37 +77,42 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     else if (clen == 6  && !strncasecmp(cstr, "GETSET", 6))     which = CMD_GETSET;
     else if (clen == 6  && !strncasecmp(cstr, "STRLEN", 6))     which = CMD_STRLEN;
 
-    // Unsupported string commands:
+    // Unsupported string we still want to wrap
     else if (clen == 6  && !strncasecmp(cstr, "APPEND", 6))     which = CMD_APPEND;
     else if (clen == 8  && !strncasecmp(cstr, "GETRANGE", 8))   which = CMD_GETRANGE;
     else if (clen == 8  && !strncasecmp(cstr, "SETRANGE", 8))   which = CMD_SETRANGE;
-    else return; // other commands are untouched
+    
+    //TODO: Check if starts with 'H'
+    // Hash family
+    else if (clen == 4  && !strncasecmp(cstr, "HGET", 4))       which = CMD_HGET;
+    else if (clen == 5  && !strncasecmp(cstr, "HMGET", 5))      which = CMD_HMGET;
+    else if (clen == 4  && !strncasecmp(cstr, "HSET", 4))       which = CMD_HSET;
+    else if (clen == 5  && !strncasecmp(cstr, "HMSET", 5))      which = CMD_HSET;
+    else if (clen == 6  && !strncasecmp(cstr, "HSETNX", 6))     which = CMD_HSETNX;
+    else if (clen == 6  && !strncasecmp(cstr, "HSETEX", 6))     which = CMD_HSETEX;
+    else if (clen == 6  && !strncasecmp(cstr, "HGETEX", 6))     which = CMD_HGETEX;
+    else if (clen == 5  && !strncasecmp(cstr, "HVALS", 5))      which = CMD_HVALS;
+    else if (clen == 7  && !strncasecmp(cstr, "HGETALL", 7))    which = CMD_HGETALL;
+    else if (clen == 7  && !strncasecmp(cstr, "HSTRLEN", 7))    which = CMD_HSTRLEN;
+    else if (clen == 10 && !strncasecmp(cstr, "HRANDFIELD", 10))which = CMD_HRANDFIELD;
+    else if (clen == 7  && !strncasecmp(cstr, "HGETDEL", 7))    which = CMD_HGETDEL;
 
-    /* Find the first key argument position for each command.
-     *   GET key                      -> key at argv[1]
-     *   SET key value ...            -> key at argv[1]
-     *   GETEX key [...]              -> key at argv[1]
-     *   GETSET key value             -> key at argv[1]
-     *   GETDEL key                   -> key at argv[1]
-     *   STRLEN key                   -> key at argv[1]
-     *   MGET key [key ...]           -> first key at argv[1]
-     *   MSET key value [..]          -> first key at argv[1]
-     *
-     * Unsupported string:
-     *   APPEND key value             -> key at argv[1]
-     *   GETRANGE key start end       -> key at argv[1]
-     *   SETRANGE key offset value    -> key at argv[1]
-     *
-     * For multi-key commands (MGET/MSET/BITOP) we only look at one key; if
-     * it is in MC/DC namespace we treat the whole command as MC/DC.
-     */
+    else {
+        // Other commands are untouched (including TTL ops, HSCAN, etc.)
+        return;
+    }
+
+    /* -------------------------------
+     * Locate key argument
+     * ------------------------------- */
+
     int key_index = 1;
     switch (which) {
     case CMD_BITOP:
         key_index = 3; // first source key
         break;
     default:
-        key_index = 1;
+        key_index = 1; // standard: GET/SET/H*/... key at argv[1]
         break;
     }
 
@@ -102,14 +128,21 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
         return;
     }
 
-    // We’re in: rewrite command name to mcdc.* version
+    /* -------------------------------
+     * Rewrite command name -> mcdc.*
+     * ------------------------------- */
+
     const char *newname = NULL;
     size_t newlen = 0;
-    mcdc_cfg_t *cfg = mcdc_config_get();
-    char *mget_cmd = cfg->async_cmd_enabled? "mcdc.mgetasync": "mcdc.mget";
-    char *mset_cmd = cfg->async_cmd_enabled? "mcdc.msetasync": "mcdc.mset";
 
+    mcdc_cfg_t *cfg = mcdc_config_get();
+    char *mget_cmd = cfg->async_cmd_enabled ? "mcdc.mgetasync" : "mcdc.mget";
+    char *mset_cmd = cfg->async_cmd_enabled ? "mcdc.msetasync" : "mcdc.mset";
+    char *hmget_cmd = cfg->async_cmd_enabled ? "mcdc.hmgetasync" : "mcdc.hmget";
+    char *hmset_cmd = cfg->async_cmd_enabled ? "mcdc.hsetasync" : "mcdc.hset";
+    
     switch (which) {
+    /* Strings */
     case CMD_GET:         newname = "mcdc.get";         newlen = sizeof("mcdc.get") - 1;         break;
     case CMD_SET:         newname = "mcdc.set";         newlen = sizeof("mcdc.set") - 1;         break;
     case CMD_GETEX:       newname = "mcdc.getex";       newlen = sizeof("mcdc.getex") - 1;       break;
@@ -126,6 +159,19 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     case CMD_APPEND:      newname = "mcdc.append";      newlen = sizeof("mcdc.append") - 1;      break;
     case CMD_GETRANGE:    newname = "mcdc.getrange";    newlen = sizeof("mcdc.getrange") - 1;    break;
     case CMD_SETRANGE:    newname = "mcdc.setrange";    newlen = sizeof("mcdc.setrange") - 1;    break;
+
+    /* Hashes */
+    case CMD_HGET:        newname = "mcdc.hget";        newlen = sizeof("mcdc.hget") - 1;        break;
+    case CMD_HMGET:       newname = hmget_cmd;          newlen = strlen(hmget_cmd);              break;
+    case CMD_HSET:        newname = hmset_cmd;          newlen = strlen(hmset_cmd);              break;
+    case CMD_HSETNX:      newname = "mcdc.hsetnx";      newlen = sizeof("mcdc.hsetnx") - 1;      break;
+    case CMD_HSETEX:      newname = "mcdc.hsetex";      newlen = sizeof("mcdc.hsetex") - 1;      break;
+    case CMD_HGETEX:      newname = "mcdc.hgetex";      newlen = sizeof("mcdc.hgetex") - 1;      break;
+    case CMD_HVALS:       newname = "mcdc.hvals";       newlen = sizeof("mcdc.hvals") - 1;       break;
+    case CMD_HGETALL:     newname = "mcdc.hgetall";     newlen = sizeof("mcdc.hgetall") - 1;     break;
+    case CMD_HSTRLEN:     newname = "mcdc.hstrlen";     newlen = sizeof("mcdc.hstrlen") - 1;     break;
+    case CMD_HRANDFIELD:  newname = "mcdc.hrandfield";  newlen = sizeof("mcdc.hrandfield") - 1;  break;
+    case CMD_HGETDEL:     newname = "mcdc.hgetdel";     newlen = sizeof("mcdc.hgetdel") - 1;     break;
 
     default:
         return;
