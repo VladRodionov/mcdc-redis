@@ -303,7 +303,7 @@ MCDC_MSetAsyncCommand(RedisModuleCtx *ctx,
     RedisModuleBlockedClient *bc =
         RedisModule_BlockClient(ctx,
                                 MCDC_MSetAsync_Reply,
-                                NULL,                   /* no timeout handler (we pass one separately) */
+                                MCDC_HSetAsync_Timeout,
                                 NULL,                   /* no free_privdata */
                                 0);                     /* no timeout */
 
