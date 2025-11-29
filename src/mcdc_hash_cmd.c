@@ -63,7 +63,11 @@ mcdc_hash_del_field(RedisModuleCtx *ctx,
     /* AutoMemory is enabled in callers, so temporary objects from Call
      * are cleaned up automatically.
      */
-    (void)RedisModule_Call(ctx, "HDEL", "ss", key, field);
+    if (MCDC_IsReplica(ctx)) {
+        RedisModule_Log(ctx, "warning",
+                        "MC/DC: skip DEL on replica (key not deleted)");
+    }
+    RedisModule_Call(ctx, "HDEL", "!ss", key, field);
 }
 
 /* Compute logical length for HSTRLEN:
@@ -376,9 +380,6 @@ MCDC_HSetCommand(RedisModuleCtx *ctx,
             return RedisModule_ReplyWithError(
                 ctx, "ERR MCDC hset: failed to read value");
         }
-
-        /* MC/DC sampling hook */
-        mcdc_sample(kptr, klen, vptr, vlen);
 
         char *stored = NULL;
         int   slen   = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);

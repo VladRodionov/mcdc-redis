@@ -76,6 +76,13 @@ uint64_t fnv1a64(const char *s);
 
 void *xzmalloc(size_t n);
 
+int mcdc_extract_dict_full_file_name(const char *manifest,
+                           size_t manifest_size,
+                           char *dict_name,
+                           size_t *dict_name_size);
+
+int mcdc_filename_no_ext(const char *name, char *out, size_t out_size);
+
 /* --------- 32-bit helpers --------- */
 
 /* Read an _Atomic uint32_t */

@@ -82,6 +82,7 @@
 #include "mcdc_dict_pool.h"
 #include "mcdc_stats.h"
 #include "mcdc_log.h"
+#include "mcdc_env.h"
 
 
 /* ----- manifest parsing ----- */
@@ -226,7 +227,6 @@ static int mcdc_save_dict_file(const char *dir,
                        const void *dict_data, size_t dict_size,
                        char **out_abs_path,        /* optional */
                        char **out_dict_basename,   /* optional: "<uuid>.dict" */
-                       size_t *out_dict_size,      /* optional */
                        char **err_out)
 {
     if (!dir || !*dir || !dict_data || dict_size == 0) {
@@ -258,8 +258,6 @@ static int mcdc_save_dict_file(const char *dir,
         *out_dict_basename = strdup(dict_base);
         if (!*out_dict_basename) { set_err(err_out, "mcdc_save_dict_file: OOM basename"); return -ENOMEM; }
     }
-    if (out_dict_size) *out_dict_size = dict_size;
-
     return 0;
 }
 
@@ -294,6 +292,7 @@ static int render_manifest_text(const char *dict_basename,
                                 const char *signature,
                                 time_t retired,
                                 char **out_text,
+                                size_t *sz,
                                 char **err_out)
 {
     char created_rfc3339[32];
@@ -312,7 +311,7 @@ static int render_manifest_text(const char *dict_basename,
                + (sig ? strlen(sig) : 0)
                + (retired > 0 ? strlen(retired_rfc3339) : 0);
 
-    char *buf = (char*)malloc(cap);
+    char *buf = (char*)xzmalloc(cap);
     if (!buf) {
         set_err(err_out, "manifest: OOM render");
         return -ENOMEM;
@@ -340,7 +339,25 @@ static int render_manifest_text(const char *dict_basename,
     }
 
     *out_text = buf;
+    *sz = n;
     return 0;
+}
+
+/* Renders manifest text and returns buffer, size*/
+static int render_manifest_text_bs(const char *dict_basename,
+                                uint16_t id,
+                                const char * const *prefixes,
+                                size_t nprefixes,
+                                int level,
+                                const char *signature,
+                                time_t created,
+                                time_t retired,
+                                char **out_text,
+                                size_t *sz)
+{
+
+    const char *ns_line = build_ns_line(prefixes, nprefixes);
+    return render_manifest_text(dict_basename, id, ns_line, created, level, signature, retired, out_text, sz, NULL);
 }
 
 /* Extract basename from absolute dict path. */
@@ -377,7 +394,8 @@ static int mcdc_save_manifest_file(const char *dir,
 
     /* render (no id line) */
     char *mf_text = NULL;
-    int rc = render_manifest_text(dict_basename, 0, ns_line, created, level, signature, retired, &mf_text, err_out);
+    size_t sz;
+    int rc = render_manifest_text(dict_basename, 0, ns_line, created, level, signature, retired, &mf_text, &sz, err_out);
     if (rc) { free(ns_line); return rc; }
 
     /* manifest basename: same UUID, ".mf" */
@@ -426,6 +444,7 @@ static int mcdc_rewrite_manifest(const mcdc_dict_meta_t *meta, char **err_out)
 
     /* render manifest text (no id= line) */
     char *mf_text = NULL;
+    size_t sz;
     int rc = render_manifest_text(
                  dict_base,
                  meta->id,
@@ -435,6 +454,7 @@ static int mcdc_rewrite_manifest(const mcdc_dict_meta_t *meta, char **err_out)
                  meta->signature,
                  meta->retired,
                  &mf_text,
+                 &sz,
                  err_out);
     if (rc) { free(ns_line); return rc; }
 
@@ -819,6 +839,7 @@ const mcdc_dict_meta_t *mcdc_lookup_by_id(const mcdc_table_t *tab, uint16_t id) 
 int mcdc_save_dictionary_and_manifest(const char *dir,
                                      const void *dict_data, size_t dict_size,
                                      const char * const *prefixes, size_t nprefixes,
+                                     uint16_t id,
                                      int level,
                                      const char *signature,
                                      time_t created,      /* 0 => now */
@@ -834,17 +855,19 @@ int mcdc_save_dictionary_and_manifest(const char *dir,
     char *dict_abs = NULL;
     char *dict_base = NULL;
     char *mf_abs = NULL;
-    size_t saved_size = 0;
-
+    char file_name[64];
+    
     /* 1) Save the dictionary bytes to <dir>/<uuid>.dict */
     int rc = mcdc_save_dict_file(dir,
                                 dict_data, dict_size,
                                 &dict_abs,           /* out abs path */
                                 &dict_base,          /* out "<uuid>.dict" */
-                                &saved_size,
                                 err_out);
     if (rc) goto fail;
-
+    if (dict_base) {
+        rc = mcdc_filename_no_ext(dict_base, file_name, 64);
+        if(rc) goto fail;
+    }
     /* Use a consistent timestamp if caller passed 0 */
     time_t ts_created = created ? created : time(NULL);
 
@@ -859,17 +882,46 @@ int mcdc_save_dictionary_and_manifest(const char *dir,
                                 &mf_abs,
                                 err_out);
     if (rc) goto fail;
+    
+    /* Publish dictionary and manifest - start */
+    char *buf = NULL;
+    size_t mcz;
+    rc = render_manifest_text_bs(dict_base,
+                              id,
+                              prefixes, nprefixes,
+                              level,
+                              signature,
+                              ts_created,
+                              retired,
+                              &buf,
+                              &mcz);
+    if (rc < 0) {
+        mcdc_log(MCDC_LOG_ERROR, "failed to render manifest body: rc=%d", rc);
+        return rc;
+    }
+    
+    /* Publish dictionary and manifest */
+    rc = mcdc_env_publish_dict(id, file_name, (const void*) dict_data, dict_size, (const void*) buf, mcz);
+    if(rc < 0) {
+        mcdc_log(MCDC_LOG_ERROR, "failed to publish dictionary and manifest: rc=%d", rc);
+        if(!buf) free(buf);
+        return rc;
+    }
+    if (!buf) {
+        free(buf);
+    }
+    /* Publish dictionary and manifets - finish */
 
     /* 3) Fill out_meta (without ID; assigned at reload) */
     if (out_meta) {
         memset(out_meta, 0, sizeof(*out_meta));
-        out_meta->id        = 0;        /* assigned later during reload */
+        out_meta->id        = id;
         out_meta->dict_path = dict_abs; /* take ownership */
         out_meta->mf_path   = mf_abs;   /* take ownership */
         out_meta->created   = ts_created;
         out_meta->retired   = retired;
         out_meta->level     = level;
-        out_meta->dict_size = saved_size;
+        out_meta->dict_size = dict_size;
 
         /* copy namespaces */
         if (!prefixes || nprefixes == 0) {

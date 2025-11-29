@@ -53,6 +53,7 @@
 #include "mcdc_utils.h"     /* set_err (if we want), but not required here */
 #include "mcdc_dict.h"      /* mcdc_table_t, mcdc_dict_meta_t, mcdc_ns_entry_t */
 #include "mcdc_compression.h" /* for mcdc_current_table(ctx) accessor */
+#include "mcdc_env.h"
 
 /* ---------- Helpers ---------- */
 
@@ -179,6 +180,8 @@ static void gc_process_expired_batch(mcdc_ctx_t *ctx, mcdc_retired_node_t *batch
                 } else {
                     delete_file_if_dead(m->dict_path);
                     delete_file_if_dead(m->mf_path);
+                    // Support external id registry
+                    mcdc_env_release_dict_id(m->id);
                 }
             }
         }
@@ -246,8 +249,12 @@ static void *gc_thread_main(void *arg) {
 /* ---------- Public: start/stop ---------- */
 
 int mcdc_gc_start(mcdc_ctx_t *ctx) {
-    if (!ctx) return -EINVAL;
-
+    if (!ctx) {
+        return -EINVAL;
+    }
+    if(!atomic_exchange_explicit(&ctx->gc_stop, NULL, memory_order_acq_rel)) {
+        return EINVAL;
+    }
     atomic_store_explicit(&ctx->gc_stop, false, memory_order_relaxed);
     atomic_store_explicit(&ctx->gc_retired_head, NULL, memory_order_relaxed);
 
@@ -271,3 +278,9 @@ void mcdc_gc_stop(mcdc_ctx_t *ctx) {
         gc_process_expired_batch(ctx, batch);
     }
 }
+
+void mcdc_gc_stop_nowait(mcdc_ctx_t *ctx) {
+    if (!ctx) return;
+    atomic_store_explicit(&ctx->gc_stop, true, memory_order_release);
+}
+

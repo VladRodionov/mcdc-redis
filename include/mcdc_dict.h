@@ -82,6 +82,7 @@ const mcdc_dict_meta_t *mcdc_lookup_by_id(const mcdc_table_t *tab, uint16_t id);
 int mcdc_save_dictionary_and_manifest(const char *dir,
                                      const void *dict_data, size_t dict_size,
                                      const char * const *prefixes, size_t nprefixes,
+                                     uint16_t dict_id,
                                      int level,
                                      const char *signature,
                                      time_t created,

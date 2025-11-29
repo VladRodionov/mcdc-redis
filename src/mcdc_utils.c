@@ -416,3 +416,94 @@ atomic_set64s(_Atomic int64_t *p, int64_t v) {
     atomic_store_explicit(p, v, memory_order_relaxed);
 }
 
+/* --------------------------
+   trim helper
+   -------------------------- */
+static inline void trim_inplace(char *s) {
+    while (*s && isspace((unsigned char)*s)) s++;
+    char *end = s + strlen(s);
+    while (end > s && isspace((unsigned char)end[-1])) end--;
+    *end = '\0';
+}
+
+/* --------------------------
+   IMPLEMENTATION TO TEST
+   -------------------------- */
+int mcdc_extract_dict_full_file_name(const char *manifest,
+                           size_t manifest_size,
+                           char *dict_name,
+                           size_t *dict_name_size)
+{
+    if (!manifest || !dict_name || !dict_name_size)
+        return -EINVAL;
+
+    size_t outcap = *dict_name_size;
+    *dict_name_size = 0;
+
+    const char *p = manifest;
+    const char *end = manifest + manifest_size;
+
+    while (p < end) {
+        const char *line_start = p;
+        const char *nl = memchr(p, '\n', end - p);
+        size_t line_len = nl ? (size_t)(nl - p) : (size_t)(end - p);
+
+        if (line_len >= 1023) line_len = 1023;
+        char buf[1024];
+        memcpy(buf, line_start, line_len);
+        buf[line_len] = '\0';
+
+        p = nl ? nl + 1 : end;
+
+        trim_inplace(buf);
+        if (!buf[0] || buf[0] == '#')
+            continue;
+
+        char *eq = strchr(buf, '=');
+        if (!eq) continue;
+
+        *eq = '\0';
+        char *key = buf;
+        char *val = eq + 1;
+
+        trim_inplace(key);
+        trim_inplace(val);
+
+        if (strcasecmp(key, "dict_file") != 0)
+            continue;
+
+        const char *slash = strrchr(val, '/');
+        const char *fname = slash ? slash + 1 : val;
+
+        size_t flen = strlen(fname);
+        if (flen + 1 > outcap)
+            return -ENAMETOOLONG;
+
+        memcpy(dict_name, fname, flen + 1);
+        *dict_name_size = flen;
+        return 0;
+    }
+
+    return -ENOENT;
+}
+
+int mcdc_filename_no_ext(const char *name, char *out, size_t out_size) {
+    if (!name || !out || out_size == 0) return -1;
+
+    size_t n = strlen(name);
+    if (n + 1 > out_size) return -2;
+
+    // Copy entire filename first
+    memcpy(out, name, n + 1);
+
+    // Look for last dot
+    char *dot = strrchr(out, '.');
+
+    // If dot exists AND is not the first char → strip extension
+    if (dot && dot != out) {
+        *dot = '\0';
+    }
+
+    return 0;
+}
+

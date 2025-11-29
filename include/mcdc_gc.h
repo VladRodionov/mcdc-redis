@@ -34,6 +34,8 @@ int  mcdc_gc_start(mcdc_ctx_t *ctx);
 /* Signal GC to stop and join the thread. Safe to call multiple times. */
 void mcdc_gc_stop(mcdc_ctx_t *ctx);
 
+void mcdc_gc_stop_nowait(mcdc_ctx_t *ctx);
+
 /* Enqueue a retired table (called by publisher). Non-blocking MPSC push. */
 void mcdc_gc_enqueue_retired(mcdc_ctx_t *ctx, mcdc_table_t *old_tab);
 

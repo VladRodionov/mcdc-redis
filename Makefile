@@ -2,6 +2,7 @@
 # Cross-platform build for macOS/Linux. Produces:
 #   - build/mcdc.so        (release)
 #   - build-debug/mcdc.so  (debug)
+#   - build-tests/*        (test binaries)
 
 # --- Toolchain ---------------------------------------------------------------
 CC      ?= cc
@@ -68,7 +69,7 @@ CFLAGS  += $(CSTD) $(WARN) $(OPT) $(DBG) $(PIC) $(DEFS) $(INC) $(ZSTD_CFLAGS)
 LDFLAGS ?=
 LIBS    = $(ZSTD_LIBS)
 
-# --- Sources -----------------------------------------------------------------
+# --- Sources: Redis module (core + glue) -------------------------------------
 SRC = \
   src/mcdc_module.c \
   src/mcdc_compression.c \
@@ -93,7 +94,10 @@ SRC = \
   src/mcdc_hash_cmd.c \
   src/mcdc_hash_async.c \
   src/mcdc_log.c \
-  src/mcdc_module_log.c  
+  src/mcdc_module_log.c \
+  src/mcdc_env.c \
+  src/mcdc_env_redis.c \
+  src/mcdc_dict_load_async.c
 
 OBJ    = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRC))
 TARGET = $(BUILD_DIR)/mcdc.$(SHLIB_EXT)
@@ -114,9 +118,78 @@ $(BUILD_DIR)/%.o: src/%.c | $(BUILD_DIR)
 $(TARGET): $(OBJ)
 	$(CC) $(SOFLAGS) -o $@ $(OBJ) $(LDFLAGS) $(LIBS)
 
+# --- Test suite --------------------------------------------------------------
+TEST_DIR        := test/smoke
+TEST_BUILD_DIR  := build-tests
+
+# Test sources (each .c becomes its own binary)
+TEST_SRC  := $(wildcard $(TEST_DIR)/*.c)
+TEST_OBJ  := $(patsubst $(TEST_DIR)/%.c,$(TEST_BUILD_DIR)/%.o,$(TEST_SRC))
+TEST_BINS := $(patsubst $(TEST_DIR)/%.c,$(TEST_BUILD_DIR)/%,$(TEST_SRC))
+
+# MC/DC core sources for tests (no Redis glue)
+CORE_SRC := \
+    src/mcdc_module.c \
+  src/mcdc_compression.c \
+  src/mcdc_config.c \
+  src/mcdc_dict.c \
+  src/mcdc_dict_pool.c \
+  src/mcdc_eff_atomic.c \
+  src/mcdc_gc.c \
+  src/mcdc_incompressible.c \
+  src/mcdc_sampling.c \
+  src/mcdc_stats.c \
+  src/mcdc_utils.c \
+  src/mcdc_admin_cmd.c \
+  src/mcdc_string_cmd.c \
+  src/mcdc_cmd_filter.c \
+  src/mcdc_role.c \
+  src/mcdc_module_utils.c \
+  src/mcdc_string_unsupported_cmd.c \
+  src/mcdc_mget_async2.c \
+  src/mcdc_thread_pool.c \
+  src/mcdc_mset_async2.c \
+  src/mcdc_hash_cmd.c \
+  src/mcdc_hash_async.c \
+  src/mcdc_log.c \
+  src/mcdc_module_log.c \
+  src/mcdc_env.c \
+  src/mcdc_env_redis.c \
+  src/mcdc_dict_load_async.c
+
+CORE_OBJ := $(patsubst src/%.c,$(TEST_BUILD_DIR)/%.o,$(CORE_SRC))
+
+$(TEST_BUILD_DIR):
+	@mkdir -p $@
+
+# Build test object files
+$(TEST_BUILD_DIR)/%.o: $(TEST_DIR)/%.c | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Build MC/DC core object files for tests
+$(TEST_BUILD_DIR)/%.o: src/%.c | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Link each test binary with MC/DC core
+$(TEST_BUILD_DIR)/%: $(TEST_BUILD_DIR)/%.o $(CORE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+.PHONY: test
+test: $(TEST_BINS)
+	@if [ -z "$(TEST_SRC)" ]; then \
+	  echo "No smoke tests found in $(TEST_DIR)"; \
+	  exit 1; \
+	fi ; \
+	echo "Running smoke tests..." ; \
+	for t in $(TEST_BINS); do \
+	  echo "==> $$t"; \
+	  "$$t"; \
+	done ; \
+	echo "All smoke tests passed."
+
 # --- Utility -----------------------------------------------------------------
 clean:
-	rm -rf build build-debug
+	rm -rf build build-debug build-tests
 
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/lib

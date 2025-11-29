@@ -3,6 +3,7 @@
 #include "mcdc_thread_pool.h"
 #include "mcdc_compression.h"
 #include "mcdc_module_utils.h"
+#include "mcdc_role.h"
 
 #include "redismodule.h"
 
@@ -168,15 +169,20 @@ MCDC_HMGetAsync_Reply(RedisModuleCtx *ctx,
         RedisModule_ReplyWithStringBuffer(ctx, buf, len);
     }
 
-    /* Delete corrupt fields */
-    for (int i = 0; i < job->nfields; i++) {
-        if (job->err_flags[i]) {
-            /* HDEL key field */
-            (void)RedisModule_Call(ctx,
-                                   "HDEL",
-                                   "!ss",
-                                   job->key,
-                                   job->fields[i]);
+    if (MCDC_IsReplica(ctx)) {
+        RedisModule_Log(ctx, "warning",
+                        "MC/DC: skip DEL on replica (key not deleted)");
+    } else {
+        /* Delete corrupt fields */
+        for (int i = 0; i < job->nfields; i++) {
+            if (job->err_flags[i]) {
+                /* HDEL key field */
+                (void)RedisModule_Call(ctx,
+                                       "HDEL",
+                                       "!ss",
+                                       job->key,
+                                       job->fields[i]);
+            }
         }
     }
 

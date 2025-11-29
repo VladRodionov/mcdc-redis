@@ -49,8 +49,6 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
          }
          return RedisModule_ReplyWithCallReply(ctx, reply);
     }
-    /* MC/DC sampling hook */
-    mcdc_sample(kptr, klen, vptr, vlen);
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
@@ -240,8 +238,6 @@ int MCDC_SetExCommand(RedisModuleCtx *ctx,
         }
         return RedisModule_ReplyWithCallReply(ctx, reply);
     }
-    /* MC/DC sampling hook */
-    mcdc_sample(kptr, klen, vptr, vlen);
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
@@ -335,8 +331,6 @@ int MCDC_PsetExCommand(RedisModuleCtx *ctx,
         }
         return RedisModule_ReplyWithCallReply(ctx, reply);
     }
-    /* MC/DC sampling hook */
-    mcdc_sample(kptr, klen, vptr, vlen);
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
@@ -430,8 +424,6 @@ int MCDC_SetNxCommand(RedisModuleCtx *ctx,
         }
         return RedisModule_ReplyWithCallReply(ctx, reply);
     }
-    /* MC/DC sampling hook */
-    mcdc_sample(kptr, klen, vptr, vlen);
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
@@ -735,8 +727,6 @@ int MCDC_GetSetCommand(RedisModuleCtx *ctx,
         }
         return RedisModule_ReplyWithCallReply(ctx, reply);
     }
-    /* MC/DC sampling hook */
-    mcdc_sample(kptr, klen, vptr, vlen);
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
@@ -1112,9 +1102,6 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
             return RedisModule_ReplyWithError(
                 ctx, "ERR MCDC mset: failed to read arguments");
         }
-
-        /* MC/DC sampling hook */
-        mcdc_sample(kptr, klen, vptr, vlen);
 
         /* Compress + wrap value with MC/DC header */
         char *stored = NULL;

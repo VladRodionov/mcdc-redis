@@ -66,6 +66,7 @@
 #include "redismodule.h"
 #include "mcdc_module_utils.h"
 #include "mcdc_log.h"
+#include "mcdc_env.h"
 
 
 static __thread tls_cache_t tls; /* zero-initialised */
@@ -492,10 +493,19 @@ static void* trainer_main(void *arg) {
             /* Persist dict + manifest (global namespace) */
             char *err = NULL;
             time_t created = time(NULL);  /* single timestamp */
-            int rc = mcdc_save_dictionary_and_manifest(
+            /* Get dictionary ID from a dictionary registry */
+            uint16_t out_id;
+            int rc = mcdc_env_alloc_dict_id(&out_id);
+            /*DEBUG*/mcdc_log(MCDC_LOG_INFO, "allocated dictioanry id=%d", out_id);
+            if (rc < 0) {
+                mcdc_log(MCDC_LOG_ERROR, "failed to allocate dictioanry id");
+                continue;
+            }
+            rc = mcdc_save_dictionary_and_manifest(
                          ctx->cfg->dict_dir,
                          dict, dict_sz,
                          NULL, 0,
+                         out_id,
                          ctx->cfg->zstd_level,
                          NULL,
                          created,
@@ -534,14 +544,14 @@ static void* trainer_main(void *arg) {
         }
         time_t finished = time(NULL);
         if (ctx->cfg->verbose > 1)
-            mcdc_log(MCDC_LOG_ERROR, "[mcdc] traininig time: %lds from start: %ld\n", finished - started_train, finished - started);
+            mcdc_log(MCDC_LOG_INFO, "[mcdc] traininig time: %lds from start: %ld\n", finished - started_train, finished - started);
     }
 
     /* never reached */
     return NULL;
 }
 
-static int mcdc_start_trainer(mcdc_ctx_t *ctx){
+static int start_trainer(mcdc_ctx_t *ctx){
     if (!ctx)
         return -ENOMEM;
     if (!ctx->cfg->enable_comp){
@@ -554,11 +564,46 @@ static int mcdc_start_trainer(mcdc_ctx_t *ctx){
         pthread_create(&ctx->trainer_tid, &attr, trainer_main, ctx);
         pthread_attr_destroy(&attr);
         if (ctx->cfg->verbose > 1) {
-            log_rate_limited(1000000ULL,
-                             "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg->dict_size);
+            mcdc_log(MCDC_LOG_INFO, "started trainer thread on master");
         }
     }
+    
     return 0;
+}
+
+static int mcdc_start_trainer(void) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    return start_trainer(ctx);
+}
+
+static void mcdc_stop_trainer(void) {
+    if(is_training_active()){
+        set_training_active(false);
+    }
+}
+
+static int mcdc_start_gc(void) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    return mcdc_gc_start(ctx);
+}
+
+static void mcdc_stop_gc(void) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    mcdc_gc_stop_nowait(ctx);
+}
+
+void mcdc_core_on_role_change(mcdc_node_role_t role) {
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
+    if (!ctx->cfg) {
+        return;
+    }
+    if (role == MCDC_NODE_ROLE_MASTER) {
+        mcdc_start_trainer();
+        mcdc_start_gc();
+    } else {
+        mcdc_stop_trainer();
+        mcdc_stop_gc();
+    }
 }
 
 /* ---------- public init / destroy ----------------------------------- */
@@ -605,12 +650,18 @@ int mcdc_init(void) {
     /* ---------------- init retired dictionaries pool --------------------- */
     mcdc_dict_pool_init();
     /* ---------------- spawn background trainer --------------------------- */
-    mcdc_start_trainer(ctx);
+    if(mcdc_get_node_role() == MCDC_NODE_ROLE_MASTER){
+        mcdc_start_trainer();
+    } else {
+        if (cfg->verbose > 1) {
+            mcdc_log(MCDC_LOG_INFO, "disabled trainer on replica");
+        }
+    }
     /* ---------------- spawn background garbage collector ------------------ */
+    
     mcdc_gc_start(ctx);
-    if (cfg->verbose > 1) {
-        log_rate_limited(0ULL,
-                         "mcz: GC thread started\n");
+    if (cfg->verbose > 0) {
+        mcdc_log(MCDC_LOG_INFO, "GC thread started");
     }
     /* ---------------  initialize sampler subsystem --------------------------*/
     mcdc_sampler_init(cfg->spool_dir, cfg->sample_p, cfg->sample_window_duration, cfg->spool_max_bytes);

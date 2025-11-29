@@ -3,6 +3,7 @@
 #include "redismodule.h"
 #include "mcdc_module_utils.h"
 #include "mcdc_compression.h"
+#include "mcdc_role.h"  /* for MCDC_IsReplica */
 
 int MCDC_DelKey(RedisModuleCtx *ctx,
                 RedisModuleString *key)
@@ -11,30 +12,42 @@ int MCDC_DelKey(RedisModuleCtx *ctx,
         return REDISMODULE_ERR;
     }
 
-    /* 
-     * Use "!" so DEL is propagated to replicas / AOF when appropriate.
-     * Format "s" = single RedisModuleString* argument.
-     */
+    /* On replicas we NEVER delete keys — just log and return OK. */
+    if (MCDC_IsReplica(ctx)) {
+        RedisModule_Log(ctx, "warning",
+                        "MC/DC: skip DEL on replica (key not deleted)");
+        return REDISMODULE_OK;
+    }
+
+    /* Master: actually delete the key. Use "!" so DEL is replicated / AOF'ed. */
     RedisModuleCallReply *reply =
         RedisModule_Call(ctx, "DEL", "!s", key);
 
     if (reply == NULL) {
-        goto error;
+        RedisModule_Log(ctx, "warning",
+                        "MC/DC: failed to delete key during downgrade (no reply)");
+        return REDISMODULE_ERR;
     }
 
     if (RedisModule_CallReplyType(reply) != REDISMODULE_REPLY_INTEGER) {
-        /* Unexpected reply type from DEL; treat as error. */
-        goto error;
+        RedisModule_FreeCallReply(reply);
+        RedisModule_Log(ctx, "warning",
+                        "MC/DC: DEL returned non-integer reply type");
+        return REDISMODULE_ERR;
     }
-    RedisModule_Log(ctx, "warning",
-                        "MC/DC: forced to delete key (dict_id not found or failed to decompress)");
-    return REDISMODULE_OK;
-    
-error:
-    RedisModule_Log(ctx, "warning",
-                        "MC/DC: failed to delete key during downgrade");
-    return REDISMODULE_ERR;
 
+    long long deleted = RedisModule_CallReplyInteger(reply);
+    RedisModule_FreeCallReply(reply);
+
+    if (deleted > 0) {
+        RedisModule_Log(ctx, "warning",
+                        "MC/DC: forced to delete key (dict_id not found or failed to decompress)");
+    } else {
+        RedisModule_Log(ctx, "notice",
+                        "MC/DC: DEL called but key did not exist");
+    }
+
+    return REDISMODULE_OK;
 }
 
 void write_u16(char *dst, int v)
@@ -78,6 +91,8 @@ size_t mcdc_encode_value(const char *key, size_t klen,
                   const char *value, size_t vlen,
                   char **outbuf)
 {
+    /* MC/DC sampling hook */
+    mcdc_sample(key, klen, value, vlen);
     // 0xFFFF is -1 (max dict_id is 65534)
     uint16_t dict_id = 0;
     /* Call into your existing MC/DC compressor. */

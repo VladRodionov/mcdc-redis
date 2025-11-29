@@ -2,7 +2,7 @@
 #define MCDC_ROLE_H
 
 #include "redismodule.h"
-
+#include "mcdc_env.h"
 
 /*
  * Simple helpers to reason about Redis role + command origin.
@@ -41,7 +41,15 @@ static inline int MCDC_IsReplicatedCommand(RedisModuleCtx *ctx) {
  */
 static inline int MCDC_ShouldCompress(RedisModuleCtx *ctx) {
     uint64_t flags = RedisModule_GetContextFlags(ctx);
-
+    mcdc_node_role_t current_role = mcdc_get_node_role();
+    
+    // check role change
+    if (flags & REDISMODULE_CTX_FLAGS_SLAVE && current_role == MCDC_NODE_ROLE_MASTER){
+        mcdc_set_node_role(MCDC_NODE_ROLE_REPLICA);
+    } else if (flags & REDISMODULE_CTX_FLAGS_MASTER && current_role == MCDC_NODE_ROLE_REPLICA) {
+        mcdc_set_node_role(MCDC_NODE_ROLE_MASTER);
+    }
+    
     if (flags & (REDISMODULE_CTX_FLAGS_SLAVE |
                  REDISMODULE_CTX_FLAGS_REPLICATED)) {
         return 0;   /* do NOT compress */

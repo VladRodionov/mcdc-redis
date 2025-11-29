@@ -17,6 +17,8 @@
 #include "mcdc_mset_async.h"
 #include "mcdc_thread_pool.h"
 #include "mcdc_module_log.h"
+#include "mcdc_env_redis.h"
+#include "mcdc_dict_load_async.h"
 
 
 static void MCDC_LogCwd(RedisModuleCtx *ctx) {
@@ -37,9 +39,21 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         == REDISMODULE_ERR) {
         return REDISMODULE_ERR;
     }
+    if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)
+         return REDISMODULE_ERR;
+    MCDC_LogCwd(ctx);
+    /* Initialize module components */
+    //TODO: error handling
+    mcdc_init();
+    if (MCDC_EnvRedisInit(ctx) != REDISMODULE_OK) {
+        RedisModule_Log(ctx, "warning", "failed to init env / dict publisher / id provider");
+        return REDISMODULE_ERR;
+    }
+    
     if (MCDC_ModuleInitLogger(ctx) != REDISMODULE_OK) {
         return REDISMODULE_ERR;
     }
+    
     MCDC_RegisterAdminCommands(ctx);
     MCDC_RegisterStringCommands(ctx);
     MCDC_RegisterUnsupportedStringCommands(ctx);
@@ -49,19 +63,21 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     MCDC_RegisterHashCommands(ctx);
     MCDC_RegisterHSetAsyncCommand(ctx);
     MCDC_RegisterHMGetAsyncCommand(ctx);
-
     /* Load and parse config directly */
-    if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)
-         return REDISMODULE_ERR;
-    MCDC_LogCwd(ctx);
-    /* Initialize module components */
-    //TODO: error handling
-    mcdc_init();
+    
+    
     if (MCDC_RegisterCommandFilter(ctx) == REDISMODULE_ERR) {
         RedisModule_Log(ctx, "warning",
                         "MC/DC: failed to register command filter");
         return REDISMODULE_ERR;
     }
+    
+    if (MCDC_RegisterDictLoadCommands(ctx) == REDISMODULE_ERR) {
+        RedisModule_Log(ctx, "warning",
+                        "MC/DC: failed to register dictionary load commands");
+        return REDISMODULE_ERR;
+    };
+    
     RedisModule_Log(ctx, "notice",
                     "MC/DC Redis module loaded with command filters");
     mcdc_cfg_t *cfg = mcdc_config_get();

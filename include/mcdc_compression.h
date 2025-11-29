@@ -128,6 +128,7 @@ bool mcdc_dict_exists(uint16_t id);
 
 bool mcdc_is_compressed (const char *v, size_t vsz);
 
+
 #ifdef __cplusplus
 }
 #endif

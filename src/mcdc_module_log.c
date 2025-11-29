@@ -1,6 +1,7 @@
 // src/mcdc_module_log.c
 #include "mcdc_module_log.h"
 #include "mcdc_log.h"       // core pluggable logger API
+#include "mcdc_env_redis.h"
 
 static RedisModuleCtx *g_log_ctx = NULL;
 
@@ -35,7 +36,7 @@ static void mcdc_redis_logger(mcdc_log_level_t level,
 
 int MCDC_ModuleInitLogger(RedisModuleCtx *ctx)
 {
-    g_log_ctx = RedisModule_GetDetachedThreadSafeContext(ctx);
+    g_log_ctx = MCDC_EnvRedis_GetThreadSafeCtx();//RedisModule_GetDetachedThreadSafeContext(ctx);
     if (!g_log_ctx) {
         return REDISMODULE_ERR;
     }
