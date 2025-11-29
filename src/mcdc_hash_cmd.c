@@ -611,6 +611,29 @@ MCDC_HSetNXCommand(RedisModuleCtx *ctx,
     return RedisModule_ReplyWithLongLong(ctx, added);
 }
 
+/* ------------------------------------------------------------------------- */
+/* mcdc.chstrlen key  - compressed value length   (one can use HSTRLEN)        */
+/* ------------------------------------------------------------------------- */
+
+int MCDC_CHstrlenCommand(RedisModuleCtx *ctx,
+                    RedisModuleString **argv,
+                    int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 3) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC chstrlen: wrong number of arguments (expected: mcdc.cstrlen key field)");
+    }
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "HSTRLEN", "ss", argv[1], argv[2]);
+
+    if (reply == NULL) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC chstrlen: underlying HSTRLEN failed");
+    }
+    return RedisModule_ReplyWithCallReply(ctx, reply);
+}
 /* -------------------------------------------------------------------------
  * mcdc.hstrlen
  * ------------------------------------------------------------------------- */
@@ -990,7 +1013,7 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
             "mcdc.hget",
             MCDC_HGetCommand,
             "readonly",
-            2, 2, 1) == REDISMODULE_ERR)
+            1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
@@ -1015,7 +1038,7 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
             "mcdc.hset",
             MCDC_HSetCommand,
             "write deny-oom",
-            2, 2, 1) == REDISMODULE_ERR)
+            1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
@@ -1033,7 +1056,7 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
             "mcdc.hsetnx",
             MCDC_HSetNXCommand,
             "write deny-oom",
-            2, 2, 1) == REDISMODULE_ERR)
+            1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
@@ -1042,7 +1065,7 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
             "mcdc.hvals",
             MCDC_HValsCommand,
             "readonly",
-            2, 2, 1) == REDISMODULE_ERR)
+            1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
@@ -1051,7 +1074,7 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
             "mcdc.hgetall",
             MCDC_HGetAllCommand,
             "readonly",
-            2, 2, 1) == REDISMODULE_ERR)
+            1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
@@ -1060,7 +1083,16 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
             "mcdc.hstrlen",
             MCDC_HStrlenCommand,
             "readonly",
-            2, 2, 1) == REDISMODULE_ERR)
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+   
+    if (RedisModule_CreateCommand(ctx,
+            "mcdc.chstrlen",
+            MCDC_CHstrlenCommand,
+            "readonly",
+            1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
@@ -1069,7 +1101,7 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
             "mcdc.hgetdel",
             MCDC_HGetDelCommand,
             "write",
-            2, 2, 1) == REDISMODULE_ERR)
+            1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
@@ -1078,7 +1110,7 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
             "mcdc.hrandfield",
             MCDC_HRandFieldCommand,
             "readonly",
-            2, -1, 1) == REDISMODULE_ERR)
+            1, 1, 1) == REDISMODULE_ERR)
     {
         return REDISMODULE_ERR;
     }
