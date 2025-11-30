@@ -19,7 +19,10 @@
 #include "mcdc_module_log.h"
 #include "mcdc_env_redis.h"
 #include "mcdc_dict_load_async.h"
+#include "mcdc_capabilities.h"
+#define REDIS_VER(maj, min, pat) (((maj) << 16) | ((min) << 8) | (pat))
 
+int g_mcdc_has_hsetex = 0;
 
 static void MCDC_LogCwd(RedisModuleCtx *ctx) {
     char cwd[PATH_MAX];
@@ -39,6 +42,12 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         == REDISMODULE_ERR) {
         return REDISMODULE_ERR;
     }
+    
+    /* Detect server version once: Redis 8.0.0+ has HSETEX/HGETEX */
+    uint64_t ver = RedisModule_GetServerVersion();
+    RedisModule_Log(ctx, "notice", "Server version raw: %llu", ver);
+    g_mcdc_has_hsetex = (ver >= REDIS_VER(8,0,0));
+
     if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)
          return REDISMODULE_ERR;
     MCDC_LogCwd(ctx);

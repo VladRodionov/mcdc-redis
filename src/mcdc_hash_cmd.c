@@ -5,6 +5,7 @@
 #include "mcdc_role.h"
 
 #include "redismodule.h"
+#include "mcdc_capabilities.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -1017,14 +1018,7 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
     {
         return REDISMODULE_ERR;
     }
-    if (RedisModule_CreateCommand(ctx,
-            "mcdc.hgetex",
-            MCDC_HGetExCommand,
-            "write",   /* changes field TTL */
-                                  1, 1, 1) == REDISMODULE_ERR)
-    {
-        return REDISMODULE_ERR;
-    }
+ 
     if (RedisModule_CreateCommand(ctx,
                 "mcdc.hmget",
                 MCDC_HMGetCommand,
@@ -1043,13 +1037,24 @@ MCDC_RegisterHashCommands(RedisModuleCtx *ctx)
         return REDISMODULE_ERR;
     }
     
-    if (RedisModule_CreateCommand(ctx,
-                "mcdc.hsetex",
-                MCDC_HSetExCommand,
-                "write deny-oom",
-                1, 1, 1) == REDISMODULE_ERR)
-    {
-        return REDISMODULE_ERR;
+    if(MCDC_HasHSetEx()){
+        if (RedisModule_CreateCommand(ctx,
+                                      "mcdc.hsetex",
+                                      MCDC_HSetExCommand,
+                                      "write deny-oom",
+                                      1, 1, 1) == REDISMODULE_ERR)
+        {
+            return REDISMODULE_ERR;
+        }
+        
+        if (RedisModule_CreateCommand(ctx,
+                                      "mcdc.hgetex",
+                                      MCDC_HGetExCommand,
+                                      "write",   /* changes field TTL */
+                                      1, 1, 1) == REDISMODULE_ERR)
+        {
+            return REDISMODULE_ERR;
+        }
     }
     
     if (RedisModule_CreateCommand(ctx,

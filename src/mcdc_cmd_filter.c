@@ -3,6 +3,7 @@
 #include "mcdc_cmd_filter.h"
 #include "mcdc_config.h"
 #include "mcdc_env.h"
+#include "mcdc_capabilities.h"
 #include <strings.h>  // for strncasecmp
 
 static RedisModuleCommandFilter *g_mcdc_filter = NULL;
@@ -219,8 +220,8 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     else if (clen == 4  && !strncasecmp(cstr, "HSET", 4))       which = CMD_HSET;
     else if (clen == 5  && !strncasecmp(cstr, "HMSET", 5))      which = CMD_HSET;
     else if (clen == 6  && !strncasecmp(cstr, "HSETNX", 6))     which = CMD_HSETNX;
-    else if (clen == 6  && !strncasecmp(cstr, "HSETEX", 6))     which = CMD_HSETEX;
-    else if (clen == 6  && !strncasecmp(cstr, "HGETEX", 6))     which = CMD_HGETEX;
+    else if (MCDC_HasHSetEx() && clen == 6  && !strncasecmp(cstr, "HSETEX", 6))     which = CMD_HSETEX;
+    else if (MCDC_HasHSetEx() && clen == 6  && !strncasecmp(cstr, "HGETEX", 6))     which = CMD_HGETEX;
     else if (clen == 5  && !strncasecmp(cstr, "HVALS", 5))      which = CMD_HVALS;
     else if (clen == 7  && !strncasecmp(cstr, "HGETALL", 7))    which = CMD_HGETALL;
     else if (clen == 7  && !strncasecmp(cstr, "HSTRLEN", 7))    which = CMD_HSTRLEN;
