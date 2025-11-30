@@ -72,8 +72,9 @@ typedef struct {
     bool     async_cmd_enabled;
     int      async_thread_pool_size;
     int      async_queue_size;
+    bool     enable_string_filter;
+    bool     enable_hash_filter;
 } mcdc_cfg_t;
-
 
 /* Default config values for MC/DC */
 
@@ -109,6 +110,8 @@ typedef struct {
 #define MCDC_DEFAULT_ASYNC_CMD_ENABLED      false;
 #define MCDC_DEFAULT_ASYNC_THREAD_POOL_SIZE 4
 #define MCDC_DEFAULT_ASYNC_QUEUE_SIZE       32
+#define MCDC_DEFAULT_ENABLE_STRING_FILTER   false
+#define MCDC_DEFAULT_ENABLE_HASH_FILTER     false
 
 
 /* --------------------------------------------------------------------

@@ -45,7 +45,6 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     
     /* Detect server version once: Redis 8.0.0+ has HSETEX/HGETEX */
     uint64_t ver = RedisModule_GetServerVersion();
-    RedisModule_Log(ctx, "notice", "Server version raw: %llu", ver);
     g_mcdc_has_hsetex = (ver >= REDIS_VER(8,0,0));
 
     if (MCDC_LoadConfig(ctx, argv, argc) != REDISMODULE_OK)
@@ -73,8 +72,7 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     MCDC_RegisterHSetAsyncCommand(ctx);
     MCDC_RegisterHMGetAsyncCommand(ctx);
     /* Load and parse config directly */
-    
-    
+
     if (MCDC_RegisterCommandFilter(ctx) == REDISMODULE_ERR) {
         RedisModule_Log(ctx, "warning",
                         "MC/DC: failed to register command filter");

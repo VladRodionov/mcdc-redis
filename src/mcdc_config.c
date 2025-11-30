@@ -191,6 +191,8 @@ void mcdc_init_default_config(void) {
     g_cfg.async_cmd_enabled     = MCDC_DEFAULT_ASYNC_CMD_ENABLED;
     g_cfg.async_thread_pool_size= MCDC_DEFAULT_ASYNC_THREAD_POOL_SIZE;
     g_cfg.async_queue_size      = MCDC_DEFAULT_ASYNC_QUEUE_SIZE;
+    g_cfg.enable_string_filter  = MCDC_DEFAULT_ENABLE_STRING_FILTER;
+    g_cfg.enable_hash_filter    = MCDC_DEFAULT_ENABLE_STRING_FILTER;
 
     inited = true;
 }
@@ -362,6 +364,12 @@ int parse_mcdc_config(const char *path)
         } else if (strcasecmp(key, "async_queue_size") == 0) {
             int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad async_queue_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.async_queue_size = (int)v;
+        } else if (strcasecmp(key, "enable_string_filter") == 0) {
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_string_filter '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.enable_string_filter = b;
+        } else if (strcasecmp(key, "enable_hash_filter") == 0) {
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_hash_filter '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.enable_hash_filter = b;
         } else {
             mcdc_log(MCDC_LOG_ERROR, "%s:%d: unknown key '%s'\n", path, ln, key);
             /* not fatal; continue */

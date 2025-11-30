@@ -146,7 +146,12 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     if (MCDC_TryRewriteDictHset(fctx, argc, cstr, clen)) {
         return;
     }
-
+    mcdc_cfg_t *cfg = mcdc_config_get();
+    bool f_str = cfg->enable_string_filter;
+    bool f_hash =  cfg->enable_hash_filter;
+    if (!f_str && !f_hash) {
+        return;
+    }
     // We only care about String + Hash + (later) bitmap commands
     enum {
         CMD_UNKNOWN = 0,
@@ -197,36 +202,36 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
      * ------------------------------- */
 
     // String family
-    if      (clen == 3  && !strncasecmp(cstr, "GET", 3))        which = CMD_GET;
-    else if (clen == 3  && !strncasecmp(cstr, "SET", 3))        which = CMD_SET;
-    else if (clen == 4  && !strncasecmp(cstr, "MGET", 4))       which = CMD_MGET;
-    else if (clen == 4  && !strncasecmp(cstr, "MSET", 4))       which = CMD_MSET;
-    else if (clen == 5  && !strncasecmp(cstr, "GETEX", 5))      which = CMD_GETEX;
-    else if (clen == 5  && !strncasecmp(cstr, "SETEX", 5))      which = CMD_SETEX;
-    else if (clen == 5  && !strncasecmp(cstr, "SETNX", 5))      which = CMD_SETNX;
-    else if (clen == 6  && !strncasecmp(cstr, "PSETEX", 6))     which = CMD_PSETEX;
-    else if (clen == 6  && !strncasecmp(cstr, "GETDEL", 6))     which = CMD_GETDEL;
-    else if (clen == 6  && !strncasecmp(cstr, "GETSET", 6))     which = CMD_GETSET;
-    else if (clen == 6  && !strncasecmp(cstr, "STRLEN", 6))     which = CMD_STRLEN;
+    if      (f_str && clen == 3  && !strncasecmp(cstr, "GET", 3))        which = CMD_GET;
+    else if (f_str && clen == 3  && !strncasecmp(cstr, "SET", 3))        which = CMD_SET;
+    else if (f_str && clen == 4  && !strncasecmp(cstr, "MGET", 4))       which = CMD_MGET;
+    else if (f_str && clen == 4  && !strncasecmp(cstr, "MSET", 4))       which = CMD_MSET;
+    else if (f_str && clen == 5  && !strncasecmp(cstr, "GETEX", 5))      which = CMD_GETEX;
+    else if (f_str && clen == 5  && !strncasecmp(cstr, "SETEX", 5))      which = CMD_SETEX;
+    else if (f_str && clen == 5  && !strncasecmp(cstr, "SETNX", 5))      which = CMD_SETNX;
+    else if (f_str && clen == 6  && !strncasecmp(cstr, "PSETEX", 6))     which = CMD_PSETEX;
+    else if (f_str && clen == 6  && !strncasecmp(cstr, "GETDEL", 6))     which = CMD_GETDEL;
+    else if (f_str && clen == 6  && !strncasecmp(cstr, "GETSET", 6))     which = CMD_GETSET;
+    else if (f_str && clen == 6  && !strncasecmp(cstr, "STRLEN", 6))     which = CMD_STRLEN;
 
     // Unsupported string we still want to wrap
-    else if (clen == 6  && !strncasecmp(cstr, "APPEND", 6))     which = CMD_APPEND;
-    else if (clen == 8  && !strncasecmp(cstr, "GETRANGE", 8))   which = CMD_GETRANGE;
-    else if (clen == 8  && !strncasecmp(cstr, "SETRANGE", 8))   which = CMD_SETRANGE;
+    else if (f_str && clen == 6  && !strncasecmp(cstr, "APPEND", 6))     which = CMD_APPEND;
+    else if (f_str && clen == 8  && !strncasecmp(cstr, "GETRANGE", 8))   which = CMD_GETRANGE;
+    else if (f_str && clen == 8  && !strncasecmp(cstr, "SETRANGE", 8))   which = CMD_SETRANGE;
 
     // Hash family
-    else if (clen == 4  && !strncasecmp(cstr, "HGET", 4))       which = CMD_HGET;
-    else if (clen == 5  && !strncasecmp(cstr, "HMGET", 5))      which = CMD_HMGET;
-    else if (clen == 4  && !strncasecmp(cstr, "HSET", 4))       which = CMD_HSET;
-    else if (clen == 5  && !strncasecmp(cstr, "HMSET", 5))      which = CMD_HSET;
-    else if (clen == 6  && !strncasecmp(cstr, "HSETNX", 6))     which = CMD_HSETNX;
-    else if (MCDC_HasHSetEx() && clen == 6  && !strncasecmp(cstr, "HSETEX", 6))     which = CMD_HSETEX;
-    else if (MCDC_HasHSetEx() && clen == 6  && !strncasecmp(cstr, "HGETEX", 6))     which = CMD_HGETEX;
-    else if (clen == 5  && !strncasecmp(cstr, "HVALS", 5))      which = CMD_HVALS;
-    else if (clen == 7  && !strncasecmp(cstr, "HGETALL", 7))    which = CMD_HGETALL;
-    else if (clen == 7  && !strncasecmp(cstr, "HSTRLEN", 7))    which = CMD_HSTRLEN;
-    else if (clen == 10 && !strncasecmp(cstr, "HRANDFIELD", 10))which = CMD_HRANDFIELD;
-    else if (clen == 7  && !strncasecmp(cstr, "HGETDEL", 7))    which = CMD_HGETDEL;
+    else if (f_hash && clen == 4  && !strncasecmp(cstr, "HGET", 4))       which = CMD_HGET;
+    else if (f_hash && clen == 5  && !strncasecmp(cstr, "HMGET", 5))      which = CMD_HMGET;
+    else if (f_hash && clen == 4  && !strncasecmp(cstr, "HSET", 4))       which = CMD_HSET;
+    else if (f_hash && clen == 5  && !strncasecmp(cstr, "HMSET", 5))      which = CMD_HSET;
+    else if (f_hash && clen == 6  && !strncasecmp(cstr, "HSETNX", 6))     which = CMD_HSETNX;
+    else if (f_hash && MCDC_HasHSetEx() && clen == 6  && !strncasecmp(cstr, "HSETEX", 6))     which = CMD_HSETEX;
+    else if (f_hash && MCDC_HasHSetEx() && clen == 6  && !strncasecmp(cstr, "HGETEX", 6))     which = CMD_HGETEX;
+    else if (f_hash && clen == 5  && !strncasecmp(cstr, "HVALS", 5))      which = CMD_HVALS;
+    else if (f_hash && clen == 7  && !strncasecmp(cstr, "HGETALL", 7))    which = CMD_HGETALL;
+    else if (f_hash && clen == 7  && !strncasecmp(cstr, "HSTRLEN", 7))    which = CMD_HSTRLEN;
+    else if (f_hash && clen == 10 && !strncasecmp(cstr, "HRANDFIELD", 10))which = CMD_HRANDFIELD;
+    else if (f_hash && clen == 7  && !strncasecmp(cstr, "HGETDEL", 7))    which = CMD_HGETDEL;
 
     else {
         // Other commands are untouched (including TTL ops, HSCAN, etc.)
@@ -266,7 +271,6 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     const char *newname = NULL;
     size_t newlen = 0;
 
-    mcdc_cfg_t *cfg = mcdc_config_get();
     char *mget_cmd  = cfg->async_cmd_enabled ? "mcdc.mgetasync"  : "mcdc.mget";
     char *mset_cmd  = cfg->async_cmd_enabled ? "mcdc.msetasync"  : "mcdc.mset";
     char *hmget_cmd = cfg->async_cmd_enabled ? "mcdc.hmgetasync" : "mcdc.hmget";
