@@ -15,7 +15,7 @@
  *   REDISMODULE_OK on success,
  *   REDISMODULE_ERR on failure.
  */
-int MCDC_ModuleInitLogger(RedisModuleCtx *ctx);
+int MCDC_ModuleInitLogger(void);
 
 /*
  * Optional: shutdown hook for logger.

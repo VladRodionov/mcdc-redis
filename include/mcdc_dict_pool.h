@@ -40,7 +40,7 @@ int mcdc_dict_pool_retain_for_meta(mcdc_dict_meta_t *m, char **err_out);
 
 
 /* Release one retain for this meta (per namespace). */
-void mcdc_dict_pool_release_for_meta(const mcdc_dict_meta_t *m, int32_t *ref_left, char **err_out);
+void mcdc_dict_pool_release_for_meta(const mcdc_dict_meta_t *m, int32_t *ref_left);
 
 /* Return the current reference count for a dictionary meta.
  * If not found in the pool, return -1.

@@ -663,7 +663,7 @@ mcdc_table_t *mcdc_scan_dict_dir(const char *dir,
                     kept_active++;
                 } else {
                     int32_t ref_left = -1;
-                    mcdc_dict_pool_release_for_meta(m, &ref_left, err_out);
+                    mcdc_dict_pool_release_for_meta(m, &ref_left);
                     if (ref_left == 0) {
                         /* retire overflow (persist to manifest) */
                         mcdc_mark_dict_retired(m, now, err_out);

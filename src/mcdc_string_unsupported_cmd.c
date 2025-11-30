@@ -115,20 +115,6 @@ MCDC_EnsureKeyDowngradedOrError(RedisModuleCtx *ctx, RedisModuleString *key)
     return REDISMODULE_OK;
 }
 
-/* Helper: downgrade multiple keys (argv[start_idx..argc-1]) */
-static int
-MCDC_EnsureKeysDowngradedOrError(RedisModuleCtx *ctx,
-                                 RedisModuleString **argv,
-                                 int start_idx,
-                                 int argc)
-{
-    for (int i = start_idx; i < argc; ++i) {
-        if (MCDC_EnsureKeyDowngradedOrError(ctx, argv[i]) != REDISMODULE_OK) {
-            return REDISMODULE_ERR;
-        }
-    }
-    return REDISMODULE_OK;
-}
 
 /* =========================================================================
  * Unsupported String commands – mcdc.<cmd>

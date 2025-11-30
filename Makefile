@@ -118,7 +118,7 @@ $(BUILD_DIR)/%.o: src/%.c | $(BUILD_DIR)
 $(TARGET): $(OBJ)
 	$(CC) $(SOFLAGS) -o $@ $(OBJ) $(LDFLAGS) $(LIBS)
 
-# --- Test suite --------------------------------------------------------------
+# --- C test suite (smoke tests) ----------------------------------------------
 TEST_DIR        := test/smoke
 TEST_BUILD_DIR  := build-tests
 
@@ -129,7 +129,7 @@ TEST_BINS := $(patsubst $(TEST_DIR)/%.c,$(TEST_BUILD_DIR)/%,$(TEST_SRC))
 
 # MC/DC core sources for tests (no Redis glue)
 CORE_SRC := \
-    src/mcdc_module.c \
+  src/mcdc_module.c \
   src/mcdc_compression.c \
   src/mcdc_config.c \
   src/mcdc_dict.c \
@@ -186,6 +186,60 @@ test: $(TEST_BINS)
 	  "$$t"; \
 	done ; \
 	echo "All smoke tests passed."
+
+###############################################################################
+# Python Integration Tests (pytest + virtualenv)
+###############################################################################
+
+PYTHON      ?= python3
+VENV_DIR    ?= .venv
+ITEST_DIR   ?= test/integration
+REQ_FILE    ?= $(ITEST_DIR)/requirements.txt
+
+PYTHON_BIN  := $(VENV_DIR)/bin/python
+PIP_BIN     := $(VENV_DIR)/bin/pip
+PYTEST_BIN  := $(VENV_DIR)/bin/pytest
+
+# Create / update virtualenv and install dependencies
+.PHONY: venv
+venv:
+	@if [ ! -d "$(VENV_DIR)" ]; then \
+	  echo "Creating Python virtualenv in $(VENV_DIR)..."; \
+	  $(PYTHON) -m venv $(VENV_DIR); \
+	fi; \
+	echo "Upgrading pip..."; \
+	"$(PIP_BIN)" install --upgrade pip >/dev/null; \
+	if [ -f "$(REQ_FILE)" ]; then \
+	  echo "Installing Python dependencies from $(REQ_FILE)..."; \
+	  "$(PIP_BIN)" install -r "$(REQ_FILE)"; \
+	else \
+	  echo "WARNING: $(REQ_FILE) not found; skipping dependency install."; \
+	fi
+
+# Integration tests: build module, ensure venv+deps, run pytest
+.PHONY: itest
+itest: $(TARGET) venv
+	@if [ ! -x "$(PYTEST_BIN)" ]; then \
+	  echo "ERROR: pytest not installed in $(VENV_DIR)."; \
+	  exit 1; \
+	fi; \
+	if [ ! -d "$(ITEST_DIR)" ]; then \
+	  echo "ERROR: integration test directory '$(ITEST_DIR)' not found."; \
+	  exit 1; \
+	fi; \
+	FILES=""; \
+	if [ -f "$(ITEST_DIR)/test_strings.py" ]; then \
+	  FILES="$$FILES $(ITEST_DIR)/test_strings.py"; \
+	fi; \
+	if [ -f "$(ITEST_DIR)/test_hashes.py" ]; then \
+	  FILES="$$FILES $(ITEST_DIR)/test_hashes.py"; \
+	fi; \
+	if [ -z "$$FILES" ]; then \
+	  echo "ERROR: no integration test files (test_strings.py / test_hashes.py) found in $(ITEST_DIR)"; \
+	  exit 1; \
+	fi; \
+	echo "Running integration tests using $(PYTEST_BIN) on: $$FILES"; \
+	MCDC_MODULE_PATH="$(TARGET)" "$(PYTEST_BIN)" -q $$FILES
 
 # --- Utility -----------------------------------------------------------------
 clean:

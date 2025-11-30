@@ -34,9 +34,9 @@ static void mcdc_redis_logger(mcdc_log_level_t level,
                     "%s", buf);
 }
 
-int MCDC_ModuleInitLogger(RedisModuleCtx *ctx)
+int MCDC_ModuleInitLogger(void)
 {
-    g_log_ctx = MCDC_EnvRedis_GetThreadSafeCtx();//RedisModule_GetDetachedThreadSafeContext(ctx);
+    g_log_ctx = MCDC_EnvRedis_GetThreadSafeCtx();
     if (!g_log_ctx) {
         return REDISMODULE_ERR;
     }

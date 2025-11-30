@@ -903,7 +903,7 @@ int MCDC_StrlenCommand(RedisModuleCtx *ctx,
         return RedisModule_ReplyWithLongLong(ctx, (long long)rlen);
     }
     if (rlen <= sizeof(uint16_t) || !mcdc_is_compressed(rptr + sizeof(uint16_t), rlen - sizeof(uint16_t))){
-        return RedisModule_ReplyWithCallReply(ctx, reply);
+        return RedisModule_ReplyWithLongLong(ctx, rlen);
     }
     /* Read dict_id from header */
     const char *payload = rptr + sizeof(uint16_t);
