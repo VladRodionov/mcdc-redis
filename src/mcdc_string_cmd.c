@@ -1159,6 +1159,42 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
     /* Redis MSET normally returns "OK" */
     return RedisModule_ReplyWithCallReply(ctx, reply);
 }
+
+/* ------------------------------------------------------------------------- */
+/* mcdc.setraw key value - set key value bypassing compression               */
+/* ------------------------------------------------------------------------- */
+int MCDC_SetRawCommand(RedisModuleCtx *ctx,
+                       RedisModuleString **argv,
+                       int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    /* mcdc.setraw key value */
+    if (argc != 3) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC setraw: wrong number of arguments "
+                 "(expected: mcdc.setraw key value)");
+    }
+
+    /* Just forward to plain SET and bypass MC/DC compression logic.
+     *
+     * Important details:
+     * - We use "!v" so this is treated as a write command and is
+     *   replicated / written to AOF.
+     * - The command filter was registered with REDISMODULE_CMDFILTER_NOSELF,
+     *   so this internal SET will NOT be rewritten to mcdc.set.
+     */
+    RedisModuleCallReply *reply =
+        RedisModule_Call(ctx, "SET", "!v", argv + 1, (size_t)2);
+
+    if (!reply) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC setraw: underlying SET failed");
+    }
+
+    return RedisModule_ReplyWithCallReply(ctx, reply);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Registration helper                                                       */
 /* ------------------------------------------------------------------------- */
@@ -1234,5 +1270,12 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
     {
         return REDISMODULE_ERR;
     }
+    
+    if (RedisModule_CreateCommand(ctx, "mcdc.setraw", MCDC_SetRawCommand, "write",
+            1, 1, 1) == REDISMODULE_ERR)
+    {
+        return REDISMODULE_ERR;
+    }
+
     return REDISMODULE_OK;
 }
