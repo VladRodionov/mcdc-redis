@@ -31,11 +31,11 @@ void write_u16(char *dst, int v);
 
 int read_u16(const char *src);
 
-size_t mcdc_encode_value(const char *key, size_t klen,
+ssize_t mcdc_encode_value(const char *key, size_t klen,
                   const char *value, size_t vlen,
                          char **outbuf);
 
-size_t mcdc_decode_value(const char *key, size_t klen,
+ssize_t mcdc_decode_value(const char *key, size_t klen,
                   const char *input, size_t ilen,
                          char **outbuf);
 uint64_t nsec_now(void);

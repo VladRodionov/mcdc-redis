@@ -383,10 +383,10 @@ MCDC_HSetCommand(RedisModuleCtx *ctx,
         }
 
         char *stored = NULL;
-        int   slen   = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+        ssize_t   slen   = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
         if (slen < 0) {
             RedisModule_Log(ctx, "warning",
-                "<mcdc> hash compression FAILED key='%.*s' value-len=%zu rc=%d",
+                "<mcdc> hash compression FAILED key='%.*s' value-len=%zu rc=%zd",
                 (int)klen, kptr, vlen, slen);
             return RedisModule_ReplyWithError(
                 ctx, "ERR MCDC hset: compression failed");
@@ -519,10 +519,10 @@ MCDC_HSetExCommand(RedisModuleCtx *ctx,
         }
 
         char *stored = NULL;
-        int   slen   = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+        ssize_t   slen   = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
         if (slen < 0) {
             RedisModule_Log(ctx, "warning",
-                "<mcdc> hash compression FAILED key='%.*s' value-len=%zu rc=%d",
+                "<mcdc> hash compression FAILED key='%.*s' value-len=%zu rc=%zd",
                 (int)klen, kptr, vlen, slen);
             return RedisModule_ReplyWithError(
                 ctx, "ERR MCDC hsetex: compression failed");

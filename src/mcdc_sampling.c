@@ -21,7 +21,9 @@
  * until 'spool_max_bytes' is reached or sampling window expired, then flips 'g_running' flag to false and stops.
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "mcdc_sampling.h"
 #include "mcdc_utils.h"
 

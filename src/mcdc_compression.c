@@ -785,7 +785,7 @@ get_meta_by_key(const char *key, size_t klen) {
     return meta;
 }
 
-ssize_t inline mcdc_orig_size(const void *src, size_t comp_size){
+inline ssize_t mcdc_orig_size(const void *src, size_t comp_size){
     return ZSTD_getFrameContentSize(src, comp_size);
 }
 

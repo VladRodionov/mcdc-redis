@@ -52,7 +52,7 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
-    int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+    ssize_t slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
     if (slen < 0) {
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC set: compression failed");
@@ -181,7 +181,7 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
      */
 
     char *out = NULL;
-    size_t outlen = mcdc_decode_value(kptr, klen,
+    ssize_t outlen = mcdc_decode_value(kptr, klen,
                                 enc_ptr, enc_len,
                                 &out);
     if (outlen < 0 || !out) {
@@ -241,7 +241,7 @@ int MCDC_SetExCommand(RedisModuleCtx *ctx,
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
-    int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+    ssize_t slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
     if (slen < 0) {
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC setex: compression failed");
@@ -334,7 +334,7 @@ int MCDC_PsetExCommand(RedisModuleCtx *ctx,
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
-    int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+    ssize_t slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
     if (slen < 0) {
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC psetex: compression failed");
@@ -427,7 +427,7 @@ int MCDC_SetNxCommand(RedisModuleCtx *ctx,
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
-    int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+    ssize_t slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
     if (slen < 0) {
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC setnx: compression failed");
@@ -526,7 +526,7 @@ int MCDC_GetCommand(RedisModuleCtx *ctx,
     size_t klen;
     const char *kptr = RedisModule_StringPtrLen(argv[1], &klen);
     char *out = NULL;
-    size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+    ssize_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
     if (outlen < 0 || !out) {
         /* MC/DC encoded (can be false positive) and decompression failed:
          * delete key and retun null
@@ -599,7 +599,7 @@ int MCDC_GetDelCommand(RedisModuleCtx *ctx,
 
     char *out = NULL;
 
-    size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+    ssize_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
     if (outlen < 0 || !out) {
         /* MC/DC encoded (can be false positive) and decompression failed:
          * delete key and retun null
@@ -674,7 +674,7 @@ int MCDC_GetExCommand(RedisModuleCtx *ctx,
     const char *kptr = RedisModule_StringPtrLen(argv[1], &klen);
 
     char *out = NULL;
-    size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+    ssize_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
     if (outlen < 0 || !out) {
         /* MC/DC encoded (can be false positive) and decompression failed:
          * delete key and retun null
@@ -730,7 +730,7 @@ int MCDC_GetSetCommand(RedisModuleCtx *ctx,
 
     /* Compress + wrap value with MC/DC header */
     char *stored = NULL;
-    int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+    ssize_t slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
     if (slen < 0) {
         return RedisModule_ReplyWithError(
             ctx, "ERR MCDC getset: compression failed");
@@ -802,7 +802,7 @@ int MCDC_GetSetCommand(RedisModuleCtx *ctx,
      */
 
     char *out = NULL;
-    size_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
+    ssize_t outlen = mcdc_decode_value(kptr, klen, rptr, rlen, &out);
     if (outlen < 0 || !out) {
         /* MC/DC encoded (can be false positive) and decompression failed:
          * delete key and retun null
@@ -1105,10 +1105,10 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
 
         /* Compress + wrap value with MC/DC header */
         char *stored = NULL;
-        int slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
+        ssize_t slen = mcdc_encode_value(kptr, klen, vptr, vlen, &stored);
         if (slen < 0) {
             RedisModule_Log(ctx, "warning",
-                    "<mcdc> compression FAILED key='%.*s' value='%.*s' value-length=%zu rc=%d",
+                    "<mcdc> compression FAILED key='%.*s' value='%.*s' value-length=%zu rc=%zd",
                     (int)klen, kptr,
                     (int)vlen, vptr, vlen,
                     slen);

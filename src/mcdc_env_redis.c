@@ -264,10 +264,6 @@ MCDC_RedisReleaseDictId(uint16_t id, void *user_data)
     (void)user_data;
     if (!g_ts_ctx) return -1;
 
-    if (id > MCDC_DICT_ID_MAX) {
-        return -1;
-    }
-
     RedisModule_ThreadSafeContextLock(g_ts_ctx);
 
     /* 1) Clear ID bit in bitmap: SETBIT mcdc:dict:ids id 0 */

@@ -87,7 +87,7 @@ int read_u16(const char *src)
  *
  */
 
-size_t mcdc_encode_value(const char *key, size_t klen,
+ssize_t mcdc_encode_value(const char *key, size_t klen,
                   const char *value, size_t vlen,
                   char **outbuf)
 {
@@ -96,7 +96,7 @@ size_t mcdc_encode_value(const char *key, size_t klen,
     // 0xFFFF is -1 (max dict_id is 65534)
     uint16_t dict_id = 0;
     /* Call into your existing MC/DC compressor. */
-    int csz = mcdc_maybe_compress(value, vlen, key, klen,
+    ssize_t csz = mcdc_maybe_compress(value, vlen, key, klen,
                            (void **) outbuf, &dict_id);
     if (csz < 0) {
         /* error */
@@ -115,7 +115,7 @@ size_t mcdc_encode_value(const char *key, size_t klen,
     }
 }
 
-size_t mcdc_decode_value(const char *key, size_t klen,
+ssize_t mcdc_decode_value(const char *key, size_t klen,
                   const char *input, size_t ilen,
                   char **outbuf)
 {
@@ -125,7 +125,7 @@ size_t mcdc_decode_value(const char *key, size_t klen,
     size_t      plen    = ilen  - sizeof(uint16_t);
 
     /* Compressed: call into your MC/DC decompressor */
-    size_t dsz = mcdc_maybe_decompress(payload, plen, key, klen,
+    ssize_t dsz = mcdc_maybe_decompress(payload, plen, key, klen,
                              (void **) outbuf, (uint16_t) dict_id);
     return dsz;
 }

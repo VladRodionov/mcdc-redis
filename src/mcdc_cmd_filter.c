@@ -5,6 +5,7 @@
 #include "mcdc_env.h"
 #include "mcdc_capabilities.h"
 #include <strings.h>  // for strncasecmp
+#include "string.h"
 
 static RedisModuleCommandFilter *g_mcdc_filter = NULL;
 
