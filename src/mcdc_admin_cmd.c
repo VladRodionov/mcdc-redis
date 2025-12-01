@@ -502,7 +502,9 @@ static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
             "spool_max_bytes: %zu\r\n"
             "enable_async_cmd: %s\r\n"
             "async_thread_pool_size: %d\r\n"
-            "async_queue_size: %d",
+            "async_queue_size: %d\r\n"
+            "enable_string_filter: %s\r\n"
+            "enable_hash_filter: %s",
             b2s(c->enable_comp),
             b2s(c->enable_dict),
             dict_dir,
@@ -527,7 +529,9 @@ static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
             c->spool_max_bytes,
             b2s(c->async_cmd_enabled),
             c->async_thread_pool_size,
-            c->async_queue_size
+            c->async_queue_size,
+            b2s(c->enable_string_filter),
+            b2s(c->enable_hash_filter)
     );
     return n;
 }
@@ -566,7 +570,9 @@ static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
             "\"spool_max_bytes\": %zu,\r\n"
             "\"enable_async_cmd\": %s,\r\n"
             "\"async_thread_pool_size\": %d,\r\n"
-            "\"async_queue_size\": %d\r\n"
+            "\"async_queue_size\": %d,\r\n"
+            "\"enable_string_filter\": %s,\r\n"
+            "\"enable_hash_filter\": %s\r\n"
             "}",
             b2s(c->enable_comp),
             b2s(c->enable_dict),
@@ -592,7 +598,9 @@ static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
             c->spool_max_bytes,
             b2s(c->async_cmd_enabled),
             c->async_thread_pool_size,
-            c->async_queue_size
+            c->async_queue_size,
+            b2s(c->enable_string_filter),
+            b2s(c->enable_hash_filter)
     );
     return n;
 }
