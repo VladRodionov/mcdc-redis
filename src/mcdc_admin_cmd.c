@@ -47,6 +47,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <errno.h>
+#include <pthread.h>
 
 #include <stdlib.h>
 #include <arpa/inet.h>
@@ -55,6 +56,20 @@
 #include "mcdc_compression.h"
 #include "mcdc_config.h"
 #include "mcdc_sampling.h"
+
+/* Small result object passed back to the reply callback */
+typedef struct {
+    int    rc;
+    char  *payload;
+    size_t plen;
+} MCDC_ReloadResult;
+
+/* Task object for the worker thread */
+typedef struct {
+    RedisModuleBlockedClient *bc;
+    int want_json;
+} MCDC_ReloadTask;
+
 
 /* Map train mode to string */
 static const char *train_mode_str(mcdc_train_mode_t m) {
@@ -305,14 +320,99 @@ int build_reload_status(char **outp, size_t *lenp, int json) {
     return 0;
 }
 
+/* ----------------- worker thread ----------------- */
+
+static void *MCDC_ReloadWorker(void *arg)
+{
+    MCDC_ReloadTask *task = (MCDC_ReloadTask *)arg;
+
+    MCDC_ReloadResult *res = RedisModule_Alloc(sizeof(*res));
+    if (!res) {
+        /* On OOM we still unblock with NULL; reply callback will handle it */
+        RedisModule_UnblockClient(task->bc, NULL);
+        RedisModule_Free(task);
+        return NULL;
+    }
+
+    res->payload = NULL;
+    res->plen    = 0;
+    res->rc      = build_reload_status(&res->payload, &res->plen,
+                                       task->want_json);
+
+    RedisModule_UnblockClient(task->bc, res);
+    RedisModule_Free(task);
+    return NULL;
+}
+
+/* ----------------- reply callback (main thread) ----------------- */
+
+static int MCDC_ReloadReply(RedisModuleCtx *ctx,
+                            RedisModuleString **argv,
+                            int argc)
+{
+    (void)argv;
+    (void)argc;
+
+    MCDC_ReloadResult *res =
+        (MCDC_ReloadResult *)RedisModule_GetBlockedClientPrivateData(ctx);
+
+    if (!res) {
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC reload: internal error (no result)");
+    }
+
+    if (res->rc != 0 || res->payload == NULL) {
+        /* Free payload from build_reload_status (malloc/free) */
+        if (res->payload) {
+            free(res->payload);
+            res->payload = NULL;
+        }
+
+        if (res->rc == -ENOMEM) {
+            RedisModule_Free(res);
+            return RedisModule_ReplyWithError(
+                ctx, "ERR MCDC reload: memory allocation failed");
+        }
+
+        RedisModule_Free(res);
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC reload: serialization failed");
+    }
+
+    /* Success: send payload */
+    RedisModule_ReplyWithStringBuffer(ctx, res->payload, res->plen);
+
+    /* Cleanup */
+    free(res->payload);
+    res->payload = NULL;
+    RedisModule_Free(res);
+
+    return REDISMODULE_OK;
+}
+
+/* ----------------- timeout callback (optional) ----------------- */
+
+static int MCDC_ReloadTimeout(RedisModuleCtx *ctx,
+                              RedisModuleString **argv,
+                              int argc)
+{
+    (void)argv;
+    (void)argc;
+    return RedisModule_ReplyWithError(
+        ctx, "ERR MCDC reload: timeout");
+}
+
+
 /* mcdc.reload [json] */
 int MCDC_ReloadCommand(RedisModuleCtx *ctx,
                        RedisModuleString **argv,
                        int argc)
 {
     RedisModule_AutoMemory(ctx);
+
     int want_json = 0;
-    /* Argument parsing */
+
+    /* Argument parsing: optional "json" */
     if (argc == 2) {
         size_t len;
         const char *arg = RedisModule_StringPtrLen(argv[1], &len);
@@ -327,26 +427,45 @@ int MCDC_ReloadCommand(RedisModuleCtx *ctx,
         return RedisModule_ReplyWithError(
             ctx, "ERR wrong number of arguments");
     }
-    /* Call your existing config builder */
-    char *payload = NULL;
-    size_t plen = 0;
-    int rc =  build_reload_status(&payload, &plen, want_json);
-    if (rc != 0 || payload == NULL) {
-        if (payload) {
-            free(payload);
-            payload = NULL;
-        }
-        if (rc == -ENOMEM) {
-            return RedisModule_ReplyWithError(
-                ctx, "ERR MCDC reload: memory allocation failed");
-        }
+
+    /* Block client; actual work happens in worker thread */
+    RedisModuleBlockedClient *bc = RedisModule_BlockClient(
+        ctx,
+        MCDC_ReloadReply,        /* reply callback */
+        MCDC_ReloadTimeout,      /* timeout callback */
+        NULL,
+        0                        /* no timeout (ms)*/
+    );
+
+    if (!bc) {
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC relaod: serialization failed");
+            ctx, "ERR MCDC reload: failed to block client");
     }
-    /* Reply with simple string using the generated payload */
-    RedisModule_ReplyWithStringBuffer(ctx, payload, plen);
-    /* Cleanup your allocated payload */
-    free(payload);
+
+    /* Prepare task for worker thread */
+    MCDC_ReloadTask *task = RedisModule_Alloc(sizeof(*task));
+    if (!task) {
+        RedisModule_UnblockClient(bc, NULL);
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC reload: out of memory");
+    }
+
+    task->bc        = bc;
+    task->want_json = want_json;
+
+    pthread_t tid;
+    int err = pthread_create(&tid, NULL, MCDC_ReloadWorker, task);
+    if (err != 0) {
+        RedisModule_UnblockClient(bc, NULL);
+        RedisModule_Free(task);
+        return RedisModule_ReplyWithError(
+            ctx, "ERR MCDC reload: failed to start worker thread");
+    }
+
+    /* We don't need to join this thread */
+    pthread_detach(tid);
+
+    /* Reply will be sent asynchronously from MCDC_ReloadReply */
     return REDISMODULE_OK;
 }
 
