@@ -205,17 +205,23 @@ PYTEST_BIN  := $(VENV_DIR)/bin/pytest
 venv:
 	@if [ ! -d "$(VENV_DIR)" ]; then \
 	  echo "Creating Python virtualenv in $(VENV_DIR)..."; \
-	  $(PYTHON) -m venv $(VENV_DIR); \
+	  $(PYTHON) -m venv "$(VENV_DIR)" || { \
+	    echo "ERROR: failed to create venv. On Ubuntu, install 'python3-venv'."; \
+	    exit 1; \
+	  }; \
+	fi; \
+	if [ ! -x "$(PIP_BIN)" ]; then \
+	  echo "Bootstrapping pip in venv using ensurepip..."; \
+	  "$(PYTHON_BIN)" -m ensurepip --upgrade || true; \
 	fi; \
 	echo "Upgrading pip..."; \
-	"$(PIP_BIN)" install --upgrade pip >/dev/null; \
+	"$(PYTHON_BIN)" -m pip install --upgrade pip >/dev/null; \
 	if [ -f "$(REQ_FILE)" ]; then \
 	  echo "Installing Python dependencies from $(REQ_FILE)..."; \
-	  "$(PIP_BIN)" install -r "$(REQ_FILE)"; \
+	  "$(PYTHON_BIN)" -m pip install -r "$(REQ_FILE)"; \
 	else \
 	  echo "WARNING: $(REQ_FILE) not found; skipping dependency install."; \
 	fi
-
 # Integration tests: build module, ensure venv+deps, run pytest
 .PHONY: itest
 itest: $(TARGET) venv
