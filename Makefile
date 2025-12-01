@@ -67,7 +67,7 @@ INC     = -Iinclude -Ideps/redis
 CFLAGS  ?=
 CFLAGS  += $(CSTD) $(WARN) $(OPT) $(DBG) $(PIC) $(DEFS) $(INC) $(ZSTD_CFLAGS)
 LDFLAGS ?=
-LIBS    = $(ZSTD_LIBS)
+LIBS    = $(ZSTD_LIBS) -lm
 
 # --- Sources: Redis module (core + glue) -------------------------------------
 SRC = \
