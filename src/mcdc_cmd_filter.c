@@ -1,10 +1,21 @@
-// src/mcdc_cmd_filter.c
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #include "redismodule.h"
 #include "mcdc_cmd_filter.h"
 #include "mcdc_config.h"
 #include "mcdc_env.h"
 #include "mcdc_capabilities.h"
-#include <strings.h>  // for strncasecmp
+#include <strings.h>
 #include "string.h"
 
 static RedisModuleCommandFilter *g_mcdc_filter = NULL;

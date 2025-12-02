@@ -1,17 +1,13 @@
 /*
- * Copyright (c) 2025 Vladimir Rodionov
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * See LICENSE-COMMUNITY.txt for details.
  */
 
 #ifndef MCDC_COMPRESSION_H
@@ -97,7 +93,7 @@ ssize_t mcdc_orig_size(const void *src, size_t comp_size);
 
 /* Return values
  *   >0  : decompressed length
- *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
+ *    0  : not compressed
  *   <0  : negative errno / ZSTD error code
  */
 ssize_t mcdc_maybe_decompress(const char *value,

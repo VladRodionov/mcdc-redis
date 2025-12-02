@@ -1,9 +1,19 @@
-// mcdc_env_redis.c
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
 
 #include "redismodule.h"
 #include "mcdc_env.h"
 #include "mcdc_log.h"
-#include "mcdc_role.h"    /* optional, for existing helpers */
+#include "mcdc_role.h"
 #include <stdint.h>
 #include <stdio.h>
 #include "string.h"
@@ -24,7 +34,7 @@ static RedisModuleCtx *g_ts_ctx = NULL; /* shared thread-safe ctx for logging + 
 #include "mcdc_log.h"
 #include "redismodule.h"
 
-extern RedisModuleCtx *g_ts_ctx;  /* from your module init */
+extern RedisModuleCtx *g_ts_ctx;
 
 void MCDC_LogReply(RedisModuleCtx *ctx,
                    const char *msg,
@@ -80,7 +90,6 @@ void MCDC_LogReply(RedisModuleCtx *ctx,
  *   HSET mcdc:dict:<id>:mf file_name <file_name> data <manifest_blob>
  *   HSET mcdc:dict:<id>    file_name <file_name> data <dict_blob>
  */
-/* Helper forward declaration */
 
 static int
 MCDC_RedisPublishDict(uint16_t dict_id,
@@ -380,7 +389,6 @@ void MCDC_EnvRedis_OnRoleChange(RedisModuleCtx *ctx,
  * Initialization entrypoints (called from RedisModule_OnLoad)
  * -------------------------------------------------------------------------- */
 
-/* Call this early in OnLoad, after RedisModule_Init() succeeds. */
 int MCDC_EnvRedisInit(RedisModuleCtx *ctx)
 {
     /* 1) Create a shared thread-safe context for logging + env callbacks. */

@@ -1,3 +1,15 @@
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #include "mcdc_string_unsupported_cmd.h"
 #include "mcdc_compression.h"   /* mcdc_is_compressed, mcdc_decode_value */
 #include "redismodule.h"

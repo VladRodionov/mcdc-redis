@@ -1,18 +1,15 @@
 /*
- * Copyright (c) 2025 Vladimir Rodionov
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * See LICENSE-COMMUNITY.txt for details.
  */
+
 /*
  * mcdc_config.c
  *
@@ -279,96 +276,96 @@ int parse_mcdc_config(const char *path)
         /* --- dispatch -------------------------------------------------- */
         if (strcasecmp(key, "comp_level") == 0) {
             char *end; errno = 0; long lvl = strtol(val, &end, 10);
-            if (end == val || *end || errno) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: invalid level '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            if (lvl < 1 || lvl > 22) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: level %ld out of range (1-22)\n", path, ln, lvl); rc = rc?rc:-ERANGE; continue; }
+            if (end == val || *end || errno) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: invalid level '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            if (lvl < 1 || lvl > 22) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: level %ld out of range (1-22)", path, ln, lvl); rc = rc?rc:-ERANGE; continue; }
             g_cfg.zstd_level = (int)lvl;
 
         } else if (strcasecmp(key, "dict_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad dict_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad dict_size '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.dict_size = (size_t)v;
         } else if (strcasecmp(key, "min_training_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad min_training_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad min_training_size '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.min_training_size = (size_t)v;
         } else if (strcasecmp(key, "min_comp_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad min_comp_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad min_comp_size '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.min_comp_size = (size_t)v;
 
         } else if (strcasecmp(key, "max_comp_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad max_comp_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad max_comp_size '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.max_comp_size = (size_t)v;
 
         } else if (strcasecmp(key, "dict_dir") == 0) {
             g_cfg.dict_dir = val && *val ? strdup(val) : NULL;
 
         } else if (strcasecmp(key, "enable_dict") == 0) {
-            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_dict '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_dict '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_dict = b;
         } else if (strcasecmp(key, "enable_comp") == 0) {
-            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_comp '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_comp '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_comp = b;
         } else if (strcasecmp(key, "enable_training") == 0) {
-            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_training '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_training '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_training = b;
         } else if (strcasecmp(key, "retraining_interval") == 0) {
-            int64_t s; if (parse_duration_sec(val, &s)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad retraining_interval '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t s; if (parse_duration_sec(val, &s)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad retraining_interval '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.retraining_interval_s = s;
         } else if (strcasecmp(key, "min_training_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad min_training_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad min_training_size '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.min_training_size = (size_t)v;
         } else if (strcasecmp(key, "ewma_alpha") == 0) {
-            double d; if (parse_frac(val, &d)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad ewma_alpha '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            double d; if (parse_frac(val, &d)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad ewma_alpha '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.ewma_alpha = d;
         } else if (strcasecmp(key, "retrain_drop") == 0) {
-            double d; if (parse_frac(val, &d)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad retrain_drop '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            double d; if (parse_frac(val, &d)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad retrain_drop '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.retrain_drop = d;
         } else if (!strcasecmp(key, "train_mode")) {
             mcdc_train_mode_t mode;
-            if(parse_train_mode(val, &mode)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad train_mode'%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue;}
+            if(parse_train_mode(val, &mode)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad train_mode'%s'", path, ln, val); rc = rc?rc:-EINVAL; continue;}
             g_cfg.train_mode = mode;
         } else if (strcasecmp(key, "gc_cool_period") == 0) {
-            int64_t s; if (parse_duration_sec(val, &s)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad gc_cool_period '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t s; if (parse_duration_sec(val, &s)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad gc_cool_period '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.gc_cool_period = s;
         } else if (strcasecmp(key, "gc_quarantine_period") == 0) {
-               int64_t s; if (parse_duration_sec(val, &s)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad gc_quarantine_period '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+               int64_t s; if (parse_duration_sec(val, &s)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad gc_quarantine_period '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.gc_quarantine_period = s;
         /* Retention */
         } else if (strcasecmp(key, "dict_retain_max") == 0) {
             char *end; long v = strtol(val, &end, 10);
-            if (val == end || *end || v < 1 || v > 256) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad dict_retain_max '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            if (val == end || *end || v < 1 || v > 256) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad dict_retain_max '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.dict_retain_max = (int)v;
 
             /* Sampling + Spool */
         } else if (strcasecmp(key, "enable_sampling") == 0) {
-            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_sampling '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_sampling '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_sampling = b;
         } else if (strcasecmp(key, "sample_p") == 0) {
-            double d; if (parse_frac(val, &d)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad sample_p '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            double d; if (parse_frac(val, &d)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad sample_p '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.sample_p = d;
         } else if (strcasecmp(key, "sample_window_duration") == 0) {
-            int64_t s; if (parse_duration_sec(val, &s)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad sample_window_duration '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t s; if (parse_duration_sec(val, &s)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad sample_window_duration '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.sample_window_duration = s;
         } else if (strcasecmp(key, "spool_dir") == 0) {
             g_cfg.spool_dir = val && *val ? strdup(val) : NULL;
         } else if (strcasecmp(key, "spool_max_bytes") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad spool_max_bytes '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad spool_max_bytes '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.spool_max_bytes = (size_t)v;
         } else if (strcasecmp(key, "compress_keys") == 0) {
             /* legacy: ignored in MC/DC; accept to avoid breaking configs */
-            mcdc_log(MCDC_LOG_ERROR, "%s:%d: NOTE: 'compress_keys' ignored\n", path, ln);
+            mcdc_log(MCDC_LOG_ERROR, "%s:%d: NOTE: 'compress_keys' ignored", path, ln);
         } else if (strcasecmp(key, "enable_async_cmd") == 0) {
-            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_async_cmd '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_async_cmd '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.async_cmd_enabled = b;
         } else if (strcasecmp(key, "async_thread_pool_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad async_thread_pool_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad async_thread_pool_size '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.async_thread_pool_size = (int)v;
         } else if (strcasecmp(key, "async_queue_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad async_queue_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            int64_t v; if (parse_bytes(val, &v)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad async_queue_size '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.async_queue_size = (int)v;
         } else if (strcasecmp(key, "enable_string_filter") == 0) {
-            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_string_filter '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_string_filter '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_string_filter = b;
         } else if (strcasecmp(key, "enable_hash_filter") == 0) {
-            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_hash_filter '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            bool b; if (parse_bool(val, &b)) { mcdc_log(MCDC_LOG_ERROR, "%s:%d: bad enable_hash_filter '%s'", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_hash_filter = b;
         } else {
             mcdc_log(MCDC_LOG_ERROR, "%s:%d: unknown key '%s'\n", path, ln, key);
@@ -379,21 +376,21 @@ int parse_mcdc_config(const char *path)
     fclose(fp);
     /* basic sanity checks */
     if (g_cfg.min_comp_size > g_cfg.max_comp_size) {
-        mcdc_log(MCDC_LOG_ERROR, "mcz: min_size > max_size\n"); rc = rc?rc:-EINVAL; goto err;
+        mcdc_log(MCDC_LOG_ERROR, "mcz: min_size > max_size"); rc = rc?rc:-EINVAL; goto err;
     }
     if (g_cfg.enable_sampling && (g_cfg.sample_p <= 0.0 || g_cfg.sample_p > 1.0)) {
-        mcdc_log(MCDC_LOG_ERROR, "mcz: sample_p must be in (0,1]\n"); rc = rc?rc:-ERANGE; goto err;
+        mcdc_log(MCDC_LOG_ERROR, "mcz: sample_p must be in (0,1]"); rc = rc?rc:-ERANGE; goto err;
     }
     if (g_cfg.dict_dir == NULL && g_cfg.enable_comp && g_cfg.enable_dict){
-        mcdc_log(MCDC_LOG_ERROR, "mcz: dictionary directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
+        mcdc_log(MCDC_LOG_ERROR, "mcz: dictionary directory is not specified"); rc = rc?rc:-EINVAL; goto err;
     }
     if (g_cfg.spool_dir == NULL && g_cfg.enable_comp && g_cfg.enable_dict){
-        mcdc_log(MCDC_LOG_ERROR, "mcz: spool directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
+        mcdc_log(MCDC_LOG_ERROR, "mcz: spool directory is not specified"); rc = rc?rc:-EINVAL; goto err;
     }
 
     return rc;      /* 0 if perfect, first fatal errno otherwise */
 err: // set compression to disabled
-    mcdc_log(MCDC_LOG_ERROR, "mcz: compression disabled due to an error in the configuration file\n");
+    mcdc_log(MCDC_LOG_ERROR, "mcz: compression disabled due to an error in the configuration file");
     g_cfg.enable_comp = false;
     g_cfg.enable_dict = false;
     return rc;

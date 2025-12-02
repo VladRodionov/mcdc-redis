@@ -1,0 +1,15 @@
+MC/DC Commercial License
+Version 1.0 — © 2025 Carrot Data Inc.
+MC/DC – Memory Cache with Dictionary Compression
+
+This license grants full rights to use, modify, integrate, and
+redistribute the MC/DC Software and any Derivative Work in any context,
+including:
+
+- SaaS or managed services,
+- Redis/Valkey/Memcached-as-a-Service offerings,
+- embedded, cloud, on-premise, or hybrid hosting.
+
+This license removes all restrictions of the Community License.
+
+No copyleft or attribution obligations apply.

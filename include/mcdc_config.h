@@ -1,17 +1,13 @@
 /*
- * Copyright (c) 2025 Vladimir Rodionov
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * See LICENSE-COMMUNITY.txt for details.
  */
 
 #ifndef MCDC_CONFIG
@@ -69,11 +65,11 @@ typedef struct {
     size_t   spool_max_bytes;       // cap bytes to collect
     int verbose;                    // logging level, default - 0 (minimum), its memcached style
     // Additional for Redis async commands support
-    bool     async_cmd_enabled;
-    int      async_thread_pool_size;
-    int      async_queue_size;
-    bool     enable_string_filter;
-    bool     enable_hash_filter;
+    bool     async_cmd_enabled;     // enable asynchronous command execution
+    int      async_thread_pool_size;// thread pool size to support async mode (default: 4)
+    int      async_queue_size;      // async tasks queue size (default: 256)
+    bool     enable_string_filter;  // override String commands (default: false)
+    bool     enable_hash_filter;    // override Hash commands (default: false)
 } mcdc_cfg_t;
 
 /* Default config values for MC/DC */

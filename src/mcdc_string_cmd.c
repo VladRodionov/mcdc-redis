@@ -1,3 +1,15 @@
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -76,9 +88,6 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
     RedisModuleString *encoded =
         RedisModule_CreateString(ctx, stored, slen);
 
-    /* If this buffer was allocated just for this call, free it.
-     * If mcdc_encode_value uses TLS, it can keep its own buffer.
-     */
     if (need_dealloc) {
         RedisModule_Free(stored);
     }
@@ -114,8 +123,8 @@ int MCDC_SetCommand(RedisModuleCtx *ctx,
     RedisModuleString **set_argv =
         RedisModule_PoolAlloc(ctx, sizeof(RedisModuleString *) * set_argc);
 
-    set_argv[0] = argv[1];      /* key */
-    set_argv[1] = encoded;      /* compressed value */
+    set_argv[0] = argv[1];
+    set_argv[1] = encoded;
 
     for (int i = 3; i < argc; i++) {
         set_argv[i - 1] = argv[i];  /* copy all options as-is */
@@ -265,9 +274,6 @@ int MCDC_SetExCommand(RedisModuleCtx *ctx,
     RedisModuleString *encoded =
         RedisModule_CreateString(ctx, stored, slen);
 
-    /* If this buffer was allocated just for this call, free it.
-     * If mcdc_encode_value uses TLS, it can keep its own buffer.
-     */
     if (need_dealloc) {
         RedisModule_Free(stored);
     }
@@ -358,9 +364,6 @@ int MCDC_PsetExCommand(RedisModuleCtx *ctx,
     RedisModuleString *encoded =
         RedisModule_CreateString(ctx, stored, slen);
 
-    /* If this buffer was allocated just for this call, free it.
-     * If mcdc_encode_value uses TLS, it can keep its own buffer.
-     */
     if (need_dealloc) {
         RedisModule_Free(stored);
     }
@@ -451,9 +454,6 @@ int MCDC_SetNxCommand(RedisModuleCtx *ctx,
     RedisModuleString *encoded =
         RedisModule_CreateString(ctx, stored, slen);
 
-    /* If this buffer was allocated just for this call, free it.
-     * If mcdc_encode_value uses TLS, it can keep its own buffer.
-     */
     if (need_dealloc) {
         RedisModule_Free(stored);
     }
@@ -1136,9 +1136,6 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
         RedisModuleString *encoded =
             RedisModule_CreateString(ctx, stored, slen);
 
-        /* If we allocated the buffer just for this call, free it.
-         * If mcdc_encode_value uses TLS, it can keep its own buffer.
-         */
         if (need_dealloc) {
             RedisModule_Free(stored);
         }

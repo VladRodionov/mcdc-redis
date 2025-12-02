@@ -1,7 +1,19 @@
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #include "mcdc_hash_cmd.h"
 
 #include "mcdc_compression.h"
-#include "mcdc_module_utils.h"  /* for any shared helpers like logging, cfg, etc */
+#include "mcdc_module_utils.h"
 #include "mcdc_role.h"
 
 #include "redismodule.h"
@@ -55,15 +67,13 @@ mcdc_hash_decode_value(const RedisModuleString *key_name,
     return REDISMODULE_OK;
 }
 
-/* HDEL helper for corrupted field. We do not log errors here. */
+/* HDEL helper for corrupted field. We should not log errors here? */
 inline static void
 mcdc_hash_del_field(RedisModuleCtx *ctx,
                     RedisModuleString *key,
                     RedisModuleString *field)
 {
-    /* AutoMemory is enabled in callers, so temporary objects from Call
-     * are cleaned up automatically.
-     */
+
     if (MCDC_IsReplica(ctx)) {
         RedisModule_Log(ctx, "warning",
                         "MC/DC: skip DEL on replica (key not deleted)");
@@ -88,7 +98,6 @@ mcdc_hash_logical_strlen(const char *bptr, size_t blen)
 
     /* val is MC/DC-compressed; ask compression layer for original size
      * without fully decoding. Implement this using ZSTD_getFrameContentSize()
-     * or equivalent in mcdc_get_uncompressed_length().
      */
     return ZSTD_getFrameContentSize(bptr + sizeof(uint16_t),
                                         blen  - sizeof(uint16_t));
@@ -563,9 +572,8 @@ MCDC_HSetExCommand(RedisModuleCtx *ctx,
 }
 
 /* -------------------------------------------------------------------------
- * mcdc.hsetnx
+ * mcdc.hsetnx key field value
  * ------------------------------------------------------------------------- */
-/* mcdc.hsetnx key field value */
 static int
 MCDC_HSetNXCommand(RedisModuleCtx *ctx,
                    RedisModuleString **argv,
@@ -613,7 +621,7 @@ MCDC_HSetNXCommand(RedisModuleCtx *ctx,
 }
 
 /* ------------------------------------------------------------------------- */
-/* mcdc.chstrlen key  - compressed value length   (one can use HSTRLEN)        */
+/* mcdc.chstrlen key  - compressed value length                              */
 /* ------------------------------------------------------------------------- */
 
 int MCDC_CHstrlenCommand(RedisModuleCtx *ctx,
@@ -675,8 +683,7 @@ MCDC_HStrlenCommand(RedisModuleCtx *ctx,
 
     ssize_t logical = mcdc_hash_logical_strlen(bptr, blen);
     if (logical < 0) {
-        /* Treat invalid/compressed-but-bad as 0; optionally you could
-         * delete the field here, but STRLEN for strings does not.
+        /* Treat invalid/compressed-but-bad as 0;
          */
         logical = 0;
     }
@@ -688,7 +695,7 @@ MCDC_HStrlenCommand(RedisModuleCtx *ctx,
  * mcdc.hvals / mcdc.hgetall
  *  - HVALS: return values only, decoded when compressed.
  *  - HGETALL: return [field, value, field, value, ...], decoding values.
- *    For corrupted compressed values, we return NULL and delete the field.
+ *    For corrupted compressed values, we return NULL
  * ------------------------------------------------------------------------- */
 
 static int

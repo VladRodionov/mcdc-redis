@@ -1,6 +1,17 @@
-// src/mcdc_module_log.c
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #include "mcdc_module_log.h"
-#include "mcdc_log.h"       // core pluggable logger API
+#include "mcdc_log.h"
 #include "mcdc_env_redis.h"
 
 static RedisModuleCtx *g_log_ctx = NULL;
@@ -19,7 +30,6 @@ static void mcdc_redis_logger(mcdc_log_level_t level,
                               const char *fmt,
                               va_list ap)
 {
-
     if (!g_log_ctx) {
         // Fallback if not initialized yet
         vfprintf(stderr, fmt, ap);

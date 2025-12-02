@@ -1,3 +1,15 @@
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #include "mcdc_hash_async.h"
 
 #include "mcdc_thread_pool.h"
@@ -252,7 +264,7 @@ MCDC_HMGetAsyncCommand(RedisModuleCtx *ctx,
     job->fields     = (RedisModuleString **)calloc(nfields, sizeof(RedisModuleString *));
     job->val_off    = (size_t *)calloc(nfields, sizeof(size_t));
     job->val_len    = (size_t *)calloc(nfields, sizeof(size_t));
-    job->out_bufs   = (char   **)calloc(nfields, sizeof(char *));
+    job->out_bufs   = (char  **)calloc(nfields, sizeof(char *));
     job->out_lens   = (size_t *)calloc(nfields, sizeof(size_t));
     job->null_flags = (int    *)calloc(nfields, sizeof(int));
     job->err_flags  = (int    *)calloc(nfields, sizeof(int));
@@ -672,5 +684,5 @@ MCDC_RegisterHSetAsyncCommand(RedisModuleCtx *ctx)
         "mcdc.hsetasync",
         MCDC_HSetAsyncCommand,
         "write deny-oom",
-        1, 1, 1);  /* hash key at argv[1] */
+        1, 1, 1);
 }

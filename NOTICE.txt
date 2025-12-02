@@ -1,0 +1,14 @@
+MC/DC NOTICE
+============
+
+MC/DC – Memory Cache with Dictionary Compression
+© 2025 Carrot Data Inc.
+
+This product includes MC/DC software licensed under the MC/DC Community License.
+
+Additional Use Restriction:
+  MC/DC and any of its forks, modifications, or derivative works may not be used
+  in any third-party Redis/Valkey/Memcached-as-a-Service offering without a
+  commercial license.
+
+Full terms: LICENSE-COMMUNITY.txt

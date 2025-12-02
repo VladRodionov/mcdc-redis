@@ -1,12 +1,21 @@
-// include/mcdc_module_log.h
-#pragma once
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
 
+#pragma once
 #include "redismodule.h"
 
 /*
  * Initialize MC/DC logging for the Redis module.
  *
- * - Creates a thread-safe RedisModuleCtx for logging
  * - Installs the Redis-backed logger into the core (mcdc_set_logger)
  *
  * Must be called from RedisModule_OnLoad().

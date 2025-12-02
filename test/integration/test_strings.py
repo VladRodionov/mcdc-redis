@@ -1,3 +1,12 @@
+# MC/DC - Memory Cache with Dictionary Compression
+# Copyright (c) 2025 Carrot Data Inc.
+#
+# Licensed under the MC/DC Community License.
+# Neither this file nor derivative works may be used in any third-party
+# Redis/Valkey/Memcached-as-a-Service product without a commercial license.
+#
+# Full terms: LICENSE-COMMUNITY.txt
+
 import time
 
 import pytest

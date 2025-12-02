@@ -1,3 +1,15 @@
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #include "mcdc_mset_async.h"
 
 #include "mcdc_thread_pool.h"
@@ -304,8 +316,8 @@ MCDC_MSetAsyncCommand(RedisModuleCtx *ctx,
         RedisModule_BlockClient(ctx,
                                 MCDC_MSetAsync_Reply,
                                 MCDC_HSetAsync_Timeout,
-                                NULL,                   /* no free_privdata */
-                                0);                     /* no timeout */
+                                NULL,
+                                0);
 
     job->bc = bc;
 

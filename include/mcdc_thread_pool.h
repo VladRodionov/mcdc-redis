@@ -1,3 +1,15 @@
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #ifndef MCDC_THREAD_POOL_H
 #define MCDC_THREAD_POOL_H
 
@@ -9,7 +21,7 @@
  * NOTE:
  *  - This code must NOT call RedisModule APIs from worker threads
  *    except functions documented as thread-safe (e.g. RedisModule_UnblockClient).
- *  - Use this pool only for CPU-heavy work on module-owned memory
+ *  - We use this pool only for CPU-heavy work on module-owned memory
  *    (compression, decompression, sampling, etc.).
  */
 
@@ -28,7 +40,7 @@ typedef void (*mcdc_job_fn)(void *arg);
  * @param nthreads   Number of worker threads to start. If nthreads <= 0,
  *                   a reasonable default (e.g. 4) will be used.
  * @param max_queue  Maximum number of enqueued jobs allowed. If max_queue <= 0,
- *                   a default (e.g. 1024) will be used.
+ *                   a default (e.g. 256) will be used.
  *
  * @return 0 on success, -1 on failure.
  *

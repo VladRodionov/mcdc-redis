@@ -1,0 +1,27 @@
+MC/DC Dual License
+==================
+
+MC/DC – Memory Cache with Dictionary Compression
+© 2025 Carrot Data Inc.
+
+MC/DC is offered under a dual-license model:
+
+1. **MC/DC Community License (Default License)**
+   - Source-available.
+   - Permissive for all uses *except* one:
+     **MC/DC and any derivative or fork may NOT be used as part of any
+     third-party Redis/Valkey/Memcached-as-a-Service offering.**
+   - Internal, embedded, and commercial on-prem usage is fully permitted.
+   - Modifications and forks are allowed; redistribution requires keeping
+     the license notice.
+
+2. **MC/DC Commercial License**
+   - Allows use of MC/DC in *any* SaaS, managed service, or cloud-hosted
+     offering, including forks and derivatives.
+   - No copyleft conditions, no restrictions.
+
+Unless you obtain a commercial license, your use is governed by the
+MC/DC Community License (LICENSE-COMMUNITY.txt).
+
+Commercial licensing:
+Carrot Data Inc. — vlad@trycarrots.io

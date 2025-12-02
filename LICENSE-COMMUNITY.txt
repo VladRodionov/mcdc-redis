@@ -1,0 +1,60 @@
+MC/DC Community License
+Version 1.1 — © 2025 Carrot Data Inc.
+MC/DC – Memory Cache with Dictionary Compression
+
+Definitions
+-----------
+“Software” means the MC/DC codebase, including source code, binaries,
+documentation, and related materials.
+
+“Database Server” means Redis, Valkey, Memcached, or derivative/forked
+implementations.
+
+“Third-Party Service” means any product, platform, or offering provided
+to external customers over a network.
+
+“Derivative Work” includes any modification, fork, extension, or other
+work based on or incorporating the Software.
+
+Grant of Rights
+---------------
+You may use, modify, compile, and distribute the Software or Derivative
+Works for any purpose, including commercial internal usage, **except as
+restricted below**.
+
+Restrictions
+------------
+1. **No Redis/Valkey/Memcached-as-a-Service Usage**
+
+   Neither the Software nor any Derivative Work may be used as part of:
+
+   - any third-party managed Redis service,
+   - any third-party managed Valkey service,
+   - any third-party managed Memcached service,
+   - any derivative database server offered *as a service* whose primary
+     function is hosting Redis/Valkey/Memcached-compatible instances.
+
+   This restriction applies regardless of:
+   - whether the Software is modified,
+   - whether the Software is linked statically or dynamically,
+   - whether the Software is bundled, embedded, forked, renamed,
+     or otherwise transformed.
+
+2. All other uses—including internal commercial deployments—are permitted
+   and unrestricted.
+
+3. You must keep this license file when redistributing the Software or any
+   Derivative Work.
+
+No Warranty
+-----------
+Provided “as is”, without warranties of any kind.
+
+Termination
+-----------
+This license terminates automatically if you violate the Restrictions above.
+
+Commercial License
+------------------
+To use MC/DC or any Derivative Work in a third-party service, contact:
+Carrot Data Inc. — vlad@trycarrots.io

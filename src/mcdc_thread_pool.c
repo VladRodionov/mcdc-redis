@@ -1,4 +1,16 @@
 /*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
+/*
  * mcdc_thread_pool.c
  *
  * Bounded worker thread pool implementation for MC/DC Redis module.
@@ -11,7 +23,7 @@
  *  - Shutdown sets 'stop' flag, wakes all workers, joins them.
  *
  * The queue is bounded: if job_count >= max_queue, Submit()
- * WILL BLOCK. This is important to avoid tanaway jobs and implement
+ * WILL BLOCK. This is important to avoid ranaway jobs and implement
  * simple back pressure algorithm
  */
 

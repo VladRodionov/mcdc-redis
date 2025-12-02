@@ -1,3 +1,15 @@
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #ifndef MCDC_DICT_LOAD_H
 #define MCDC_DICT_LOAD_H
 
@@ -17,8 +29,6 @@
  *   - Run file I/O in a worker thread via mcdc_threadpool_submit(...)
  *   - Reply "OK" on success, or an error on failure.
  *
- * The actual dict reload / core notification is intentionally left out;
- * you can hook it in the worker if needed.
  */
 
 /* Entry points for RedisModule_CreateCommand */

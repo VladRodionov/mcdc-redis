@@ -1,4 +1,16 @@
 /*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
+/*
  * Copyright (c) 2025 Vladimir Rodionov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -698,7 +710,6 @@ static int build_ns_ascii(char **outp, size_t *lenp) {
         }
     }
     if (!has_default) total += sizeof("default\r\n") - 1;
-    //total += sizeof("END\r\n") - 1;
 
     char *buf = (char *)malloc(total + 1);
     if (!buf) return -1;
@@ -716,7 +727,6 @@ static int build_ns_ascii(char **outp, size_t *lenp) {
         }
     }
     if (!has_default) off += (size_t)sprintf(buf + off, "\r\ndefault");
-    //off += (size_t)sprintf(buf + off, "END\r\n");
     buf[off] = '\0';
 
     if (list) free((void*)list);

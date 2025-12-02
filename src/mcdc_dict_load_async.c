@@ -1,3 +1,15 @@
+/*
+ * MC/DC - Memory Cache with Dictionary Compression
+ * Copyright (c) 2025 Carrot Data Inc.
+ *
+ * Licensed under the MC/DC Community License.
+ * You may use, modify, and distribute this file, except that neither MC/DC
+ * nor any derivative work may be used in any third-party
+ * Redis/Valkey/Memcached-as-a-Service offering.
+ *
+ * See LICENSE-COMMUNITY.txt for details.
+ */
+
 #include "mcdc_dict_load_async.h"
 #include "mcdc_log.h"
 #include "mcdc_env.h"
@@ -23,8 +35,6 @@
  *   - Run file I/O in a dedicated pthread
  *   - Reply "OK" on success, or an error on failure.
  *
- * The actual dict reload / core notification is intentionally left out;
- * you can hook it in the worker if needed.
  */
 
 /* -------------------------------------------------------------------------
@@ -38,9 +48,9 @@ typedef enum {
 
 typedef struct mcdc_load_job {
     mcdc_load_kind_t kind;
-    char            *basename;   /* e.g. "ns_001"               */
-    unsigned char   *data;       /* raw blob                    */
-    size_t           len;        /* blob length                 */
+    char            *basename;
+    unsigned char   *data;
+    size_t           len;
     RedisModuleBlockedClient *bc;
 } mcdc_load_job_t;
 
@@ -106,7 +116,7 @@ MCDC_LoadFileWorker(void *arg)
     mcdc_load_job_t *job = arg;
     int rc = 0;
 
-    const char *dir = mcdc_env_get_dict_dir();  /* must be configured in env */
+    const char *dir = mcdc_env_get_dict_dir();
     if (!dir || !*dir) {
         rc = -EINVAL;
     } else {
@@ -116,10 +126,6 @@ MCDC_LoadFileWorker(void *arg)
                                           ".mf",
                                           job->data,
                                           job->len);
-            if (rc == 0) {
-                /* Optional: notify core that manifest arrived */
-                /* e.g., mcdc_env_on_manifest_arrived(job->basename); */
-            }
         } else {
             rc = mcdc_write_file_with_ext(dir,
                                           job->basename,
@@ -133,10 +139,8 @@ MCDC_LoadFileWorker(void *arg)
         }
     }
 
-    /* Unblock client on main thread, pass rc as privdata */
     RedisModule_UnblockClient(job->bc, (void *)(intptr_t)rc);
 
-    /* Free job memory */
     free(job->basename);
     free(job->data);
     free(job);
@@ -180,8 +184,6 @@ MCDC_LoadTimeout(RedisModuleCtx *ctx,
 {
     (void)argv;
     (void)argc;
-
-    /* If we ever hit a timeout, reply with an error */
     RedisModule_ReplyWithError(ctx, "ERR MC/DC load: timed out");
     return REDISMODULE_OK;
 }
@@ -277,10 +279,7 @@ MCDC_ParseLoadArgsAndSubmit(RedisModuleCtx *ctx,
         return RedisModule_ReplyWithError(ctx, buf);
     }
 
-    /* We don't need to join; let the OS reclaim on exit */
     pthread_detach(tid);
-
-    /* We will reply later from unblock callback */
     return REDISMODULE_OK;
 }
 
