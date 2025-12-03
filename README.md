@@ -2,7 +2,7 @@
 
 # MC/DC — Memory Cache with Dictionary Compression
 
-MC/DC is a high‑performance **Redis/Valkey module** that provides **transparent dictionary‑based compression** for string and hash values. It delivers dramatic memory savings (up to 4x in real datasets) while preserving full compatibility with existing clients.
+MC/DC is a high‑performance **Redis/Valkey module** that provides **transparent dictionary‑based compression** for string and hash values. It delivers dramatic memory savings (up to 4x in real datasets **compared to a client-side compression**) while preserving full compatibility with existing clients.
 
 MC/DC is designed for teams running large caching workloads who want:
 
