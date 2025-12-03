@@ -41,6 +41,7 @@ MC/DC introduces **Zstandard dictionary compression** with:
 - Async hot loading on replicas
 
 All compression is transparent to applications. Applications continue using Redis/Valkey normally.
+Read more about benefits of a dictionary comnpression: [Dictionary Compression 101](https://github.com/VladRodionov/mcdc#dictionary-compression-101)
 
 ---
 
@@ -89,7 +90,7 @@ MC/DC rewrites Redis/Valkey commands internally (this feature is configurable) w
 
 Memory usage and preformance results for strings are published here:
 
-### 👉 [**MC/DC Memory Usage Benchmark (WiKi)**](https://github.com/VladRodionov/mcdc-redis/wiki/Memory-usage-benchmark)
+### [**MC/DC Memory Usage Benchmark (WiKi)**](https://github.com/VladRodionov/mcdc-redis/wiki/Memory-usage-benchmark)
 
 For typical workloads:
 
