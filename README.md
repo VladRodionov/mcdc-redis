@@ -1,6 +1,6 @@
 # MC/DC — Memory Cache with Dictionary Compression
 
-MC/DC is a high‑performance **Redis/Valkey module** and **Memcached fork** that provides **transparent dictionary‑based compression** for string and hash values. It delivers dramatic memory savings (up to 3x in real workloads) while preserving full compatibility with existing clients.
+MC/DC is a high‑performance **Redis/Valkey module** that provides **transparent dictionary‑based compression** for string and hash values. It delivers dramatic memory savings (up to 4x in real datasets) while preserving full compatibility with existing clients.
 
 MC/DC is designed for teams running large caching workloads who want:
 
@@ -15,7 +15,7 @@ MC/DC is designed for teams running large caching workloads who want:
 
 MC/DC integrates advanced compression into existing caching environments without changing application code.
 
-### **✔ Redis/Valkey Module Features**
+### Redis/Valkey Module Features
 
 - Transparent compression for:
   - String commands (`GET`, `SET`, `MGET`, `MSET`, etc.)
@@ -26,14 +26,6 @@ MC/DC integrates advanced compression into existing caching environments without
 - Replication‑safe dictionary/metadata propagation to replicas
 - Hot reload of dictionaries (`mcdc.reload` command)
 - Efficient C‑tier implementation
-
-### **✔ Memcached Fork Features**
-
-- Based on Memcached 1.6.38
-- Same dictionary engine as Redis module
-- Drop‑in replacement for Memcached
-- Optional compression of all values
-- New stats for compression efficiency
 
 ---
 
@@ -46,15 +38,15 @@ MC/DC introduces **Zstandard dictionary compression** with:
 - Dictionary persistence
 - Async hot loading on replicas
 
-All compression is transparent to applications. Applications continue using Redis/Valkey or Memcached normally.
+All compression is transparent to applications. Applications continue using Redis/Valkey normally.
 
 ---
 
 ## 3. Supported Commands
 
-MC/DC rewrites Redis/Valkey commands internally while preserving behavior.
+MC/DC rewrites Redis/Valkey commands internally (this feature is configurable) while preserving behavior.
 
-### **String Commands**
+### String Commands
 
 - `GET`, `SET`, `SETEX`, `SETNX`
 - `GETEX`, `GETSET`, `GETDEL`
@@ -62,27 +54,29 @@ MC/DC rewrites Redis/Valkey commands internally while preserving behavior.
 - `STRLEN`
 - Unsupported but wrapped: `APPEND`, `GETRANGE`, `SETRANGE`
 
-### **Hash Commands**
+### Hash Commands
 
 - `HGET`, `HSET`, `HMGET`, `HMSET`
 - `HSETNX`, `HSETEX`, `HGETEX`
 - `HVALS`, `HGETALL`, `HSTRLEN`
 - `HRANDFIELD`, `HGETDEL`
 
-### **Async Commands**
+### Async Commands
 
 - `mcdc.mgetasync`
 - `mcdc.msetasync`
 - `mcdc.hmgetasync`
 - `mcdc.hsetasync`
 
-### **Admin Commands**
+### Admin Commands
 
 - `mcdc.reload` — hot reload dictionaries/config
 - `mcdc.stats` — compression & dictionary stats
-- `mcdc.setraw` — store raw uncompressed data
+- `mcdc.config` - get current MC/DC configuration
+- `mcdc.ns` - get current list of supported namespaces
+- `mcdc.sampler` - start/stop/ get status of data sampling
 
-### **MC/DC Internal Commands**
+### MC/DC Internal Commands
 
 - `mcdc.ld` / `mcdc.lm` — replica dictionary & manifest hydration
 - Metadata stored under `mcdc:dict:*`
@@ -108,23 +102,18 @@ For typical workloads:
 
 MC/DC has three major components:
 
-### **1. Compression Engine**
+### 1. Compression Engine
 
 - Zstandard dictionary compression
 - Per‑namespace dictionaries
+- Comprehensive per-namepsace stats
 - Dedicated GC, trainer and data sampler threads
 
-### **2. Redis/Valkey Module Layer**
+### 2. Redis/Valkey Module Layer
 
 - Command filter rewrites Redis commands to MC/DC equivalents
 - Async blocked‑client engine (no module threads required)
 - Replication‑safe dictionary/metadata propagation using HSET wrappers
-
-### **3. Memcached Fork Layer**
-
-- Same dictionary training + compression engine
-- Memcached‑compatible networking & storage
-- Shared dictionary pool implementation
 
 ---
 
@@ -147,7 +136,7 @@ mcdc-redis/
 
 ## 7. Build, Test, Install, Run
 
-Please refer to this document for instructions: 
+Please refer to this document for instructions: [Build, Test, Install, Run]
 
 ---
 
