@@ -1,3 +1,5 @@
+[**Why MC/DC Exists**](https://github.com/VladRodionov/mcdc/wiki/Why-MC-DC-Exists-(with-personal-notes)) ⚡⚡⚡ [**Documentation**](https://github.com/VladRodionov/mcdc-redis/wiki/Quick-Start-Guide) ⚡⚡⚡ [**Forum**](https://github.com/VladRodionov/mcdc-redis/discussions)
+
 # MC/DC — Memory Cache with Dictionary Compression
 
 MC/DC is a high‑performance **Redis/Valkey module** that provides **transparent dictionary‑based compression** for string and hash values. It delivers dramatic memory savings (up to 4x in real datasets) while preserving full compatibility with existing clients.
