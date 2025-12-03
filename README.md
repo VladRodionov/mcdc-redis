@@ -164,8 +164,9 @@ Notes:
 
 ---
 
-## 9. Redis / Valkey Cluster Compatibility
+## 9. [Redis / Valkey Cluster Compatibility](https://github.com/VladRodionov/mcdc-redis/wiki/Redis-Valkey-Cluster-Compatibility)
 
+---
 
 ## 10. License
 
