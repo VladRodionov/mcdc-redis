@@ -164,7 +164,10 @@ Notes:
 
 ---
 
-## 8. License
+## 9. Redis / Valkey Cluster Compatibility
+
+
+## 10. License
 
 MC/DC is offered under a dual-license model:
 
@@ -207,13 +210,13 @@ For details, see:
 
 ---
 
-## 9. Support
+## 11. Support
 
 For commercial support or licensing: **Email:** `vlad@trycarrots.io`
 
 ---
 
-## 10. Status
+## 12. Status
 
 MC/DC is currently in **Developer Preview**. The API is stable, and production-hardening is ongoing.
 
