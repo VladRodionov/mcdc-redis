@@ -137,9 +137,30 @@ mcdc-redis/
 └── README.md           # You are here
 ```
 
+---
+
 ## 7. Build, Test, Install, Run
 
 Please refer to this document for instructions: [Build, Test, Install, Run](https://github.com/VladRodionov/mcdc-redis/wiki/MC-DC-–-Build,-Test-&-Installation-Guide)
+
+---
+
+## 8. Redis/Valkey Compatibility
+
+MC/DC is implemented as a Redis module and follows the stable Redis Modules API introduced in Redis 7.0.
+It is compiled against redismodule.h from Redis 7.0, which guarantees broad compatibility.
+
+Supported Versions:
+
+- Redis	7.0+	Fully compatible with OSS Redis 7.x. Redis 8.0 requires AGPL but is technically compatible.
+- Valkey	7.2.4+	Fully compatible with Valkey’s modules API.
+
+> Contact us if you need support for Redis 6.x
+
+Notes:
+- MC/DC avoids Redis 8.0-only APIs, so it is expected to continue working on both branches.
+- All functionality relies strictly on public Redis Modules API calls—no private server internals.
+- If running mixed Redis/Valkey deployments, ensure module loading paths and configuration formats match.
 
 ---
 
@@ -184,6 +205,8 @@ For details, see:
 - `LICENSE-COMMERCIAL`
 - `NOTICE` (Anti‑Cloud Notice)
 
+---
+
 ## 9. Support
 
 For commercial support or licensing: **Email:** `vlad@trycarrots.io`
@@ -195,5 +218,10 @@ For commercial support or licensing: **Email:** `vlad@trycarrots.io`
 MC/DC is currently in **Developer Preview**. The API is stable, and production-hardening is ongoing.
 
 If you'd like early-adopter support or want to try MC/DC at scale, reach out!
+
+---
+© 2025 Carrot Data, Inc. All rights reserved.
+
+
 
 
