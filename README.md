@@ -41,7 +41,7 @@ MC/DC introduces **Zstandard dictionary compression** with:
 - Async hot loading on replicas
 
 All compression is transparent to applications. Applications continue using Redis/Valkey normally.
-Read more about benefits of a dictionary comnpression: [Dictionary Compression 101](https://github.com/VladRodionov/mcdc#dictionary-compression-101)
+Read more about benefits of a dictionary compression: [Dictionary Compression 101](https://github.com/VladRodionov/mcdc#dictionary-compression-101)
 
 ---
 
