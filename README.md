@@ -102,7 +102,7 @@ For typical workloads:
 
 ## 5. Architecture Overview
 
-MC/DC has three major components:
+MC/DC has two major components:
 
 ### 1. Compression Engine
 
