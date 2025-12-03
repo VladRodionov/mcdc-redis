@@ -136,7 +136,7 @@ mcdc-redis/
 
 ## 7. Build, Test, Install, Run
 
-Please refer to this document for instructions: [Build, Test, Install, Run]
+Please refer to this document for instructions: [Build, Test, Install, Run](https://github.com/VladRodionov/mcdc-redis/wiki/MC-DC-–-Build,-Test-&-Installation-Guide)
 
 ---
 
