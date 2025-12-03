@@ -146,17 +146,17 @@ MC/DC is offered under a dual-license model:
 
 1. MC/DC Community License (Default)
 A source-available, permissive license intended for:
-	•	individual developers
-	•	startups and internal company use
-	•	academic and research use
-	•	commercial products that do not offer Redis/Valkey/Memcached-as-a-Service
+- individual developers
+- startups and internal company use
+- academic and research use
+- commercial products that do not offer Redis/Valkey/Memcached-as-a-Service
 
 Under the Community License you may:
-	•	use MC/DC freely in your own applications and infrastructure
-	•	modify it
-	•	redistribute it inside your software
-	•	deploy it in production
-	•	ship commercial products that embed MC/DC
+- use MC/DC freely in your own applications and infrastructure
+- modify it
+- redistribute it inside your software
+- deploy it in production
+- ship commercial products that embed MC/DC
 
 However, the Community License prohibits offering MC/DC (or any derivative, including forks) as part of a hosted Redis/Valkey/Memcached service, meaning:
 
@@ -166,9 +166,9 @@ You may not use MC/DC to provide Redis-as-a-Service, Valkey-as-a-Service, Memcac
 
 2. Commercial License
 For cloud providers or anyone wishing to:
-	•	offer Redis/Valkey/Memcached with MC/DC as a hosted/public service
-	•	embed MC/DC inside a broader managed data platform
-	•	avoid the Community License restrictions
+- offer Redis/Valkey/Memcached with MC/DC as a hosted/public service
+- embed MC/DC inside a broader managed data platform
+- avoid the Community License restrictions
 
 A commercial license removes all service restrictions.
 
