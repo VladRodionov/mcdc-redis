@@ -7,7 +7,7 @@ MC/DC is a high‑performance **Redis/Valkey module** that provides **transparen
 MC/DC is designed for teams running large caching workloads who want:
 
 - Much **lower RAM costs**
-- **Drop‑in compatibility** with Redis/Valkey and Memcached
+- **Drop‑in compatibility** with Redis/Valkey
 - **Fast** compression/decompression using Zstandard + per‑namespace dictionaries
 - **Production‑grade safety** (replication-safe, async I/O and dictionary management)
 
@@ -37,7 +37,8 @@ MC/DC introduces **Zstandard dictionary compression** with:
 
 - Per‑namespace dictionaries
 - Automatic online training (based on sampled values)
-- Dictionary persistence
+- External dictionary training support
+- Dictionary persistence and safe distribution from master to replicas
 - Async hot loading on replicas
 
 All compression is transparent to applications. Applications continue using Redis/Valkey normally.
@@ -49,40 +50,9 @@ Read more about benefits of a dictionary compression: [Dictionary Compression 10
 
 MC/DC rewrites Redis/Valkey commands internally (this feature is configurable) while preserving behavior.
 
-### String Commands
+For the full list of supported/unsupported Redis commands please refer to this [WiKi document](https://github.com/VladRodionov/mcdc-redis/wiki/MC-DC-Phase%E2%80%901-Command-Support-Matrix)
 
-- `GET`, `SET`, `SETEX`, `SETNX`
-- `GETEX`, `GETSET`, `GETDEL`
-- `MGET`, `MSET`
-- `STRLEN`
-- Unsupported but wrapped: `APPEND`, `GETRANGE`, `SETRANGE`
-
-### Hash Commands
-
-- `HGET`, `HSET`, `HMGET`, `HMSET`
-- `HSETNX`, `HSETEX`, `HGETEX`
-- `HVALS`, `HGETALL`, `HSTRLEN`
-- `HRANDFIELD`, `HGETDEL`
-
-### Async Commands
-
-- `mcdc.mgetasync`
-- `mcdc.msetasync`
-- `mcdc.hmgetasync`
-- `mcdc.hsetasync`
-
-### Admin Commands
-
-- `mcdc.reload` — hot reload dictionaries/config
-- `mcdc.stats` — compression & dictionary stats
-- `mcdc.config` - get current MC/DC configuration
-- `mcdc.ns` - get current list of supported namespaces
-- `mcdc.sampler` - start/stop/ get status of data sampling
-
-### MC/DC Internal Commands
-
-- `mcdc.ld` / `mcdc.lm` — replica dictionary & manifest hydration
-- Metadata stored under `mcdc:dict:*`
+For the full list of MC/DC commands including Admin commands pease refer to the [Quick Start Guide](https://github.com/VladRodionov/mcdc-redis/wiki/Quick-Start-Guide)
 
 ---
 
