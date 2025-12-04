@@ -179,6 +179,7 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
         CMD_GETDEL,
         CMD_MGET,
         CMD_MSET,
+        CMD_MSETNX,
         CMD_STRLEN,
 
         // Unsupported string commands we wrap:
@@ -224,6 +225,7 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     else if (f_str && clen == 6  && !strncasecmp(cstr, "PSETEX", 6))     which = CMD_PSETEX;
     else if (f_str && clen == 6  && !strncasecmp(cstr, "GETDEL", 6))     which = CMD_GETDEL;
     else if (f_str && clen == 6  && !strncasecmp(cstr, "GETSET", 6))     which = CMD_GETSET;
+    else if (f_str && clen == 6  && !strncasecmp(cstr, "MSETNX", 6))     which = CMD_MSETNX;
     else if (f_str && clen == 6  && !strncasecmp(cstr, "STRLEN", 6))     which = CMD_STRLEN;
 
     // Unsupported string we still want to wrap
@@ -302,6 +304,7 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
     case CMD_SETEX:       newname = "mcdc.setex";       newlen = sizeof("mcdc.setex") - 1;       break;
     case CMD_SETNX:       newname = "mcdc.setnx";       newlen = sizeof("mcdc.setnx") - 1;       break;
     case CMD_PSETEX:      newname = "mcdc.psetex";      newlen = sizeof("mcdc.psetex") - 1;      break;
+    case CMD_MSETNX:      newname = "mcdc.msetnx";      newlen = sizeof("mcdc.msetnx") - 1;      break;
 
     // Unsupported string mapped to module commands:
     case CMD_APPEND:      newname = "mcdc.append";      newlen = sizeof("mcdc.append") - 1;      break;

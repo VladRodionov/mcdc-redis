@@ -1047,16 +1047,16 @@ int MCDC_MGetCommand(RedisModuleCtx *ctx,
 /* ------------------------------------------------------------------------- */
 /* mcdc.mset key value [key value ...] - multi set                           */
 /* ------------------------------------------------------------------------- */
-int MCDC_MSetCommand(RedisModuleCtx *ctx,
+int MCDC_MSetFamilyCommand(RedisModuleCtx *ctx,
                      RedisModuleString **argv,
-                     int argc)
+                     int argc, const char *cmd)
 {
     RedisModule_AutoMemory(ctx);
 
     /* mcdc.mset key1 value1 [key2 value2 ...] */
     if (argc < 3 || (argc % 2) == 0) {
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC mset: wrong number of arguments (expected: mcdc.mset key value [key value ...])");
+            ctx, "ERR MCDC mset(nx): wrong number of arguments (expected: mcdc.mset(nx) key value [key value ...])");
     }
 
     int n_pairs   = (argc - 1) / 2;
@@ -1069,10 +1069,10 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
     if (!MCDC_ShouldCompress(ctx)) {
         /* argv[1..argc-1] are exactly: key, value, [options…] */
         RedisModuleCallReply *reply =
-            RedisModule_Call(ctx, "MSET", "v", argv + 1, (size_t)(argc - 1));
+            RedisModule_Call(ctx, cmd, "v", argv + 1, (size_t)(argc - 1));
         if (!reply) {
             return RedisModule_ReplyWithError(
-                ctx, "ERR MCDC set: underlying SET failed");
+                ctx, "ERR MCDC mset(nx): underlying cmd failed");
         }
         return RedisModule_ReplyWithCallReply(ctx, reply);
     }
@@ -1100,7 +1100,7 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
 
         if (!kptr || !vptr) {
             return RedisModule_ReplyWithError(
-                ctx, "ERR MCDC mset: failed to read arguments");
+                ctx, "ERR MCDC mset(nx): failed to read arguments");
         }
 
         /* Compress + wrap value with MC/DC header */
@@ -1113,7 +1113,7 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
                     (int)vlen, vptr, vlen,
                     slen);
             return RedisModule_ReplyWithError(
-                ctx, "ERR MCDC mset: compression failed");
+                ctx, "ERR MCDC mset(nx): compression failed");
         }
 
         bool need_dealloc = false;
@@ -1127,7 +1127,7 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
             stored = RedisModule_Alloc(slen);
             if (!stored) {
                 return RedisModule_ReplyWithError(
-                    ctx, "ERR MCDC mset: memory allocation failed");
+                    ctx, "ERR MCDC mset(nx): memory allocation failed");
             }
             memcpy(stored, vptr, vlen);
         }
@@ -1146,15 +1146,27 @@ int MCDC_MSetCommand(RedisModuleCtx *ctx,
 
     /* Call underlying Redis MSET with all encoded pairs */
     RedisModuleCallReply *reply =
-        RedisModule_Call(ctx, "MSET", "!v", mset_argv, mset_argc);
+        RedisModule_Call(ctx, cmd, "!v", mset_argv, mset_argc);
 
     if (reply == NULL) {
         return RedisModule_ReplyWithError(
-            ctx, "ERR MCDC mset: underlying MSET failed");
+            ctx, "ERR MCDC mset(nx): underlying MSET failed");
     }
 
     /* Redis MSET normally returns "OK" */
     return RedisModule_ReplyWithCallReply(ctx, reply);
+}
+
+int MCDC_MSetCommand(RedisModuleCtx *ctx,
+                     RedisModuleString **argv,
+                     int argc) {
+    return MCDC_MSetFamilyCommand(ctx, argv, argc, "MSET");
+}
+
+int MCDC_MSetNXCommand(RedisModuleCtx *ctx,
+                     RedisModuleString **argv,
+                     int argc) {
+    return MCDC_MSetFamilyCommand(ctx, argv, argc, "MSETNX");
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1263,6 +1275,12 @@ int MCDC_RegisterStringCommands(RedisModuleCtx *ctx)
     }
     
     if (RedisModule_CreateCommand(ctx, "mcdc.mset", MCDC_MSetCommand, "write deny-oom",
+            1, -1, 2) == REDISMODULE_ERR)  /* keys: argv[1], argv[3], ..., step=2 */
+    {
+        return REDISMODULE_ERR;
+    }
+   
+    if (RedisModule_CreateCommand(ctx, "mcdc.msetnx", MCDC_MSetNXCommand, "write deny-oom",
             1, -1, 2) == REDISMODULE_ERR)  /* keys: argv[1], argv[3], ..., step=2 */
     {
         return REDISMODULE_ERR;
