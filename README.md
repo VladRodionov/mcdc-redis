@@ -58,7 +58,7 @@ For the full list of MC/DC commands including Admin commands pease refer to the 
 
 ## 4. Performance
 
-Memory usage and preformance results for strings are published here:
+Memory usage and performance results for strings are published here:
 
 ### [**MC/DC Memory Usage Benchmark (WiKi)**](https://github.com/VladRodionov/mcdc-redis/wiki/Memory-usage-benchmark)
 
