@@ -228,6 +228,7 @@ static void MCDC_CommandFilter(RedisModuleCommandFilterCtx *fctx) {
 
     // Unsupported string we still want to wrap
     else if (f_str && clen == 6  && !strncasecmp(cstr, "APPEND", 6))     which = CMD_APPEND;
+    else if (f_str && clen == 6  && !strncasecmp(cstr, "SUBSTR", 6))     which = CMD_GETRANGE;
     else if (f_str && clen == 8  && !strncasecmp(cstr, "GETRANGE", 8))   which = CMD_GETRANGE;
     else if (f_str && clen == 8  && !strncasecmp(cstr, "SETRANGE", 8))   which = CMD_SETRANGE;
 
