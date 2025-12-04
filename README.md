@@ -52,7 +52,7 @@ MC/DC rewrites Redis/Valkey commands internally (this feature is configurable) w
 
 For the full list of supported/unsupported Redis commands please refer to this [WiKi document](https://github.com/VladRodionov/mcdc-redis/wiki/MC-DC-Phase%E2%80%901-Command-Support-Matrix)
 
-For the full list of MC/DC commands including Admin commands pease refer to the [Quick Start Guide](https://github.com/VladRodionov/mcdc-redis/wiki/Quick-Start-Guide)
+For the full list of MC/DC commands including Admin commands please refer to the [Quick Start Guide](https://github.com/VladRodionov/mcdc-redis/wiki/Quick-Start-Guide)
 
 ---
 
