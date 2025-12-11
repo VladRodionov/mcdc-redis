@@ -510,6 +510,7 @@ static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
             "enable_sampling: %s\r\n"
             "sample_p: %.6f\r\n"
             "sample_window_duration: %d\r\n"
+            "training_window_duration: %d\r\n"
             "spool_dir: %s\r\n"
             "spool_max_bytes: %zu\r\n"
             "enable_async_cmd: %s\r\n"
@@ -537,6 +538,7 @@ static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
             b2s(c->enable_sampling),
             c->sample_p,
             c->sample_window_duration,
+            c->training_window_duration,
             spool_dir,
             c->spool_max_bytes,
             b2s(c->async_cmd_enabled),
@@ -578,6 +580,7 @@ static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
             "\"enable_sampling\": %s,\r\n"
             "\"sample_p\": %.6f,\r\n"
             "\"sample_window_duration\": %d,\r\n"
+            "\"training_window_duration\": %d,\r\n"
             "\"spool_dir\": \"%s\",\r\n"
             "\"spool_max_bytes\": %zu,\r\n"
             "\"enable_async_cmd\": %s,\r\n"
@@ -606,6 +609,7 @@ static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
             b2s(c->enable_sampling),
             c->sample_p,
             c->sample_window_duration,
+            c->training_window_duration,
             spool_dir,
             c->spool_max_bytes,
             b2s(c->async_cmd_enabled),

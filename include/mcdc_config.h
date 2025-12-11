@@ -49,8 +49,8 @@ typedef struct {
     size_t   min_training_size;     // bytes of eligible data since last train
     double   ewma_alpha;            // 0..1 (alpha in EWMA)
     double   retrain_drop;          // 0..1 drop  in compression efficency to trigger retraining
-    mcdc_train_mode_t train_mode;    // FAST (default) or OPTIMIZE (slower, sometimes can give some improvement)
-
+    mcdc_train_mode_t train_mode;   // FAST (default) or OPTIMIZE (slower, sometimes can give some improvement)
+    int32_t  training_window_duration;        // Training duration in seconds (Reservoir Algorithm R)
     // GC
     int32_t gc_cool_period;         // default, 1h - time to keep retired dictionary data in memory
     int32_t gc_quarantine_period;   // default: 7d, time to keep retired dictionary in a file system
@@ -108,6 +108,8 @@ typedef struct {
 #define MCDC_DEFAULT_ASYNC_QUEUE_SIZE       32
 #define MCDC_DEFAULT_ENABLE_STRING_FILTER   false
 #define MCDC_DEFAULT_ENABLE_HASH_FILTER     false
+#define MCDC_DEFAULT_TRAINING_WINDOW_DURATION 0
+
 
 
 /* --------------------------------------------------------------------

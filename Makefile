@@ -97,7 +97,8 @@ SRC = \
   src/mcdc_module_log.c \
   src/mcdc_env.c \
   src/mcdc_env_redis.c \
-  src/mcdc_dict_load_async.c
+  src/mcdc_dict_load_async.c \
+  src/mcdc_reservoir.c
 
 OBJ    = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRC))
 TARGET = $(BUILD_DIR)/mcdc.$(SHLIB_EXT)
@@ -155,7 +156,8 @@ CORE_SRC := \
   src/mcdc_module_log.c \
   src/mcdc_env.c \
   src/mcdc_env_redis.c \
-  src/mcdc_dict_load_async.c
+  src/mcdc_dict_load_async.c \
+  src/mcdc_reservoir.c
 
 CORE_OBJ := $(patsubst src/%.c,$(TEST_BUILD_DIR)/%.o,$(CORE_SRC))
 

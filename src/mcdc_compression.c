@@ -64,12 +64,15 @@
 #include "mcdc_module_utils.h"
 #include "mcdc_log.h"
 #include "mcdc_env.h"
+#include "mcdc_reservoir.h"
 
 
 static __thread tls_cache_t tls; /* zero-initialised */
 
 /* ---------- zstd context --------------------------------------------- */
 mcdc_ctx_t g_mcz = { 0 };
+
+mcdc_reservoir_t g_rvr = { 0 };
 
 /* ---------- zstd context helpers ------------------------------------ */
 const mcdc_ctx_t *mcdc_ctx(void)      { return &g_mcz; }
@@ -363,110 +366,89 @@ static size_t train_dictionary(void* dictBuf, size_t dictCap,
 /* ---------- trainer thread ------------------------------------------ */
 static void* trainer_main(void *arg) {
     mcdc_ctx_t *ctx = arg;
-    const size_t max_dict = ctx->cfg->dict_size ? ctx->cfg->dict_size : 110 * 1024;
+    const size_t max_dict = ctx->cfg->dict_size
+                          ? ctx->cfg->dict_size
+                          : 110 * 1024;
+
     const size_t train_threshold =
-        ctx->cfg->min_training_size ? ctx->cfg->min_training_size : max_dict * 100; /* 100× rule */
+        ctx->cfg->min_training_size
+            ? ctx->cfg->min_training_size
+            : max_dict * 100; /* the 100× heuristic as a byte budget */
+
     time_t started = time(NULL);
+    mcdc_reservoir_init(&g_rvr, train_threshold, ctx->cfg->training_window_duration, 0);
 
     for (;;) {
         sleep_ms(1000); // 1000 ms
 
         bool need_training = false;
-        bool success = false;
+        bool success       = false;
 
-        /* Decide if training should be active (sticky until success/admin-off) */
-        const mcdc_table_t* tab = (const mcdc_table_t*) atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
-        if(!mcdc_has_default_dict(tab)) {
-            need_training = true; /* bootstrap */
+        /* Decide if training should be active (sticky until success/admin-off). */
+        const mcdc_table_t *tab =
+            (const mcdc_table_t *)atomic_load_explicit(
+                &ctx->dict_table, memory_order_acquire);
+
+        if (!mcdc_has_default_dict(tab)) {
+            /* Bootstrap: no default dict yet. */
+            need_training = true;
         } else if (mcdc_eff_should_retrain((uint64_t)time(NULL))) {
             need_training = true;
         }
 
-        if (need_training) set_training_active(true);
-        if (!is_training_active()) continue;
+        if (need_training) {
+            set_training_active(true);
+        }
+        if (!is_training_active()) {
+            continue;
+        }
+        mcdc_reservoir_check_start_session(&g_rvr);
+        /* Training window / reservoir gate. */
+        if (!mcdc_reservoir_ready(&g_rvr)) {
+            continue;
+        }
 
-        /* Threshold gate */
-        size_t pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
+        /* Export samples from reservoir. */
+        uint8_t *buff  = NULL;
+        size_t  *sizes = NULL;
+        size_t   count = 0;
+        size_t   total = 0;
+
+        int snap = mcdc_reservoir_snapshot(&g_rvr,
+                                           &buff,
+                                           &sizes,
+                                           &count,
+                                           &total);
+        
+        /* get statistics for "default" namespace */
+        mcdc_stats_atomic_t *stats =
+            mcdc_stats_lookup_by_ns("default", 7);
+
+        if (snap <= 0 || count == 0 || total == 0) {
+            if (buff)  free(buff);
+            if (sizes) free(sizes);
+            if (stats) atomic_inc64(&stats->trainer_errs, 1);
+            continue;
+        }
+
+        if (stats) {
+            atomic_set64(&stats->reservoir_bytes, (uint64_t)total);
+            atomic_set64(&stats->reservoir_items, (uint64_t)count);
+        }
 
         time_t started_train = time(NULL);
 
-        if (pending < train_threshold) continue;
-
-        /* get statistics for "default" namespace*/
-        mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_ns("default", 7);
-        if (stats) atomic_inc64(&stats->trainer_runs, 1);
-
-        /* Take ownership of sample list */
-        sample_node_t *list = atomic_exchange_explicit(&ctx->samples_head, NULL, memory_order_acq_rel);
-        if (!list) {
-            if (stats) atomic_inc64(&stats->trainer_errs, 1);
-            continue;
-        }
-
-        /* Count and size accumulation with overflow guard */
-        size_t count = 0, total = 0;
-        for (sample_node_t *p = list; p; p = p->next) {
-            count++;
-            if (SIZE_MAX - total < p->len) { /* overflow */
-                // Drop this batch safely
-                for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
-                // Best-effort correction; avoid underflow on concurrent updates
-                size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
-                size_t dec = now_pending < pending ? now_pending : pending;
-                atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
-                continue;
-            }
-            total += p->len;
-        }
-        if (count == 0 || total == 0) {
-            // Return budget and continue
-            size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
-            size_t dec = total <= now_pending ? total : now_pending;
-            atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
-            // free empty list (shouldn’t happen)
-            for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
-            if (stats) atomic_inc64(&stats->trainer_errs, 1);
-            continue;
-        }
-
-        size_t *sizes = (size_t*)malloc(sizeof(size_t) * count);
-        char   *buff  = (char*)malloc(total);
-        if (!sizes || !buff) {
-            // OOM: drop batch
-            for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
-            free(sizes); free(buff);
-            size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
-            size_t dec = total <= now_pending ? total : now_pending;
-            atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
-            if (stats) {
-                atomic_inc64(&stats->trainer_errs, 1);
-                atomic_set64(&stats->reservoir_bytes, 0);
-                atomic_set64(&stats->reservoir_items, 0);
-            }
-            continue;
-        }
-
-        /* Flatten samples */
-        sample_node_t *n = list;
-        size_t off = 0;
-        for (size_t i = 0; i < count; ++i, n = n->next) {
-            sizes[i] = n->len;
-            memcpy(buff + off, n->buf, n->len);
-            off += n->len;
-        }
-
-        /* Train dictionary */
+        /* Train dictionary from flat buffer. */
         void *dict = calloc(1, max_dict);
         if (!dict) {
-            for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
-            free(buff); free(sizes);
-            size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
-            size_t dec = total <= now_pending ? total : now_pending;
-            atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
-            atomic_inc64(&stats->trainer_errs, 1);
+            if (stats) atomic_inc64(&stats->trainer_errs, 1);
+            free(buff);
+            free(sizes);
             continue;
         }
-        size_t dict_sz = train_dictionary(dict, max_dict, buff, sizes, count);
+
+        size_t dict_sz = train_dictionary(dict, max_dict,
+                                          buff, sizes, count);
 
         if (ZSTD_isError(dict_sz)) {
             if (ctx->cfg->verbose > 1) {
@@ -478,70 +460,79 @@ static void* trainer_main(void *arg) {
         } else if (dict_sz < 1024) {
             if (ctx->cfg->verbose > 1) {
                 log_rate_limited(10ULL * 1000000ULL,
-                    "mcz-dict: dict too small (%zu B, need ≥1 KiB)\n", dict_sz);
+                    "mcz-dict: dict too small (%zu B, need ≥1 KiB)\n",
+                    dict_sz);
             }
             if (stats) atomic_inc64(&stats->trainer_errs, 1);
         } else {
             if (ctx->cfg->verbose > 1) {
                 log_rate_limited(1000000ULL,
-                    "mcz-dict: new dict (%zu B) built from %zu samples\n", dict_sz, count);
+                    "mcz-dict: new dict (%zu B) built from %zu samples\n",
+                    dict_sz, count);
             }
 
-            /* Persist dict + manifest (global namespace) */
-            char *err = NULL;
-            time_t created = time(NULL);  /* single timestamp */
-            /* Get dictionary ID from a dictionary registry */
+            /* Persist dict + manifest (global / default namespace). */
+            char   *err     = NULL;
+            time_t  created = time(NULL);
             uint16_t out_id;
+
             int rc = mcdc_env_alloc_dict_id(&out_id);
-            /*DEBUG*/mcdc_log(MCDC_LOG_INFO, "allocated dictioanry id=%d", out_id);
+            mcdc_log(MCDC_LOG_INFO,
+                     "allocated dictionary id=%d", out_id);
+
             if (rc < 0) {
-                mcdc_log(MCDC_LOG_ERROR, "failed to allocate dictioanry id");
-                continue;
-            }
-            rc = mcdc_save_dictionary_and_manifest(
-                         ctx->cfg->dict_dir,
-                         dict, dict_sz,
-                         NULL, 0,
-                         out_id,
-                         ctx->cfg->zstd_level,
-                         NULL,
-                         created,
-                         0,
-                         NULL, /* out_meta not needed here */
-                         &err);
-            if (rc == 0) {
-                (void)mcdc_reload_dictionaries();
-                success = true;
-            } else {
-                mcdc_log(MCDC_LOG_ERROR, "save failed: %s\n", err ? err : "unknown error");
-                free(err);
+                mcdc_log(MCDC_LOG_ERROR,
+                         "failed to allocate dictionary id");
                 if (stats) atomic_inc64(&stats->trainer_errs, 1);
+            } else {
+                rc = mcdc_save_dictionary_and_manifest(
+                        ctx->cfg->dict_dir,
+                        dict, dict_sz,
+                        NULL, 0,              /* no external samples file */
+                        out_id,
+                        ctx->cfg->zstd_level,
+                        NULL,                 /* no user meta */
+                        created,
+                        0,                    /* trainer_run_id */
+                        NULL,                 /* out_meta not needed */
+                        &err);
+
+                if (rc == 0) {
+                    (void)mcdc_reload_dictionaries();
+                    success = true;
+                } else {
+                    mcdc_log(MCDC_LOG_ERROR,
+                             "save failed: %s\n",
+                             err ? err : "unknown error");
+                    free(err);
+                    if (stats) atomic_inc64(&stats->trainer_errs, 1);
+                }
             }
         }
 
-        /* Return consumed bytes exactly once (guard underflow on races) */
-        size_t now_pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
-        size_t dec = total <= now_pending ? total : now_pending;
-        atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
-
-        /* Free temps and list */
+        /* Free temps. */
         free(dict);
-        for (sample_node_t *q = list; q; ) { sample_node_t *tmp = q->next; free(q->buf); free(q); q = tmp; }
         free(buff);
         free(sizes);
-        uint64_t now = (uint64_t)time(NULL);
+
+        uint64_t now_ms = (uint64_t)time(NULL) * 1000ULL;
         if (stats) {
-            atomic_set64(&stats->reservoir_bytes, 0);
-            atomic_set64(&stats->reservoir_items, 0);
-            atomic_set64(&stats->trainer_ms_last, now * 1000);
+            atomic_set64(&stats->trainer_ms_last, now_ms);
         }
+
         if (success) {
-            set_training_active(false);               /* stop sampling until EWMA triggers again */
-            mcdc_eff_mark_retrained(now);
+            /* Stop sampling until EWMA triggers again. */
+            set_training_active(false);
+            mcdc_eff_mark_retrained((uint64_t)(now_ms / 1000ULL));
         }
+
         time_t finished = time(NULL);
-        if (ctx->cfg->verbose > 1)
-            mcdc_log(MCDC_LOG_INFO, "[mcdc] traininig time: %lds from start: %ld\n", finished - started_train, finished - started);
+        if (ctx->cfg->verbose > 1) {
+            mcdc_log(MCDC_LOG_INFO,
+                     "[mcdc] training time: %lds from start: %ld\n",
+                     (long)(finished - started_train),
+                     (long)(finished - started));
+        }
     }
 
     /* never reached */
@@ -700,8 +691,7 @@ static void sample_for_training(const void *key, size_t klen, const void *src, s
     if (!is_training_active()) /* skip if training is not active */
         return;
     const mcdc_table_t* tab = (const mcdc_table_t*) atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
-    bool empty_state = !mcdc_has_default_dict(tab);
-    double p = empty_state? 1.0: ctx->cfg->sample_p;
+    double p = ctx->cfg->sample_p;
 
     /* Suppose p is in [0,1]. Represent it as fixed-point threshold: */
     uint32_t threshold = (uint32_t)((double)UINT32_MAX * p);
@@ -719,42 +709,14 @@ static void sample_for_training(const void *key, size_t klen, const void *src, s
         return;
     }
 
-    /* ---- back-pressure: stop once corpus ≥ min_train_bytes ---------- */
-    size_t limit =
-            ctx->cfg->min_training_size ?
-                    ctx->cfg->min_training_size : ctx->cfg->dict_size * 100; /* 100× rule */
-
-    if (atomic_load_explicit(&ctx->bytes_pending, memory_order_relaxed)
-            >= limit)
-        return; /* trainer hasn’t processed yet     */
-
-    /* ---- allocate sample node -------------------------------------- */
-    sample_node_t *node = malloc(sizeof(sample_node_t));
-    if (!node)
-        return;
-    node->buf = malloc(len);
-    if (!node->buf) {
-        free(node);
-        return;
-    }
-    memcpy(node->buf, src, len);
-    node->len = len;
-
-    /* ---- lock-free push into MPSC list ------------------------------ */
-    sample_node_t *old_head;
-    do {
-        old_head = atomic_load_explicit(&ctx->samples_head,
-                memory_order_acquire);
-        node->next = old_head;
-    } while (!atomic_compare_exchange_weak_explicit(&ctx->samples_head,
-            &old_head, node, memory_order_release, memory_order_relaxed));
-
-    atomic_fetch_add_explicit(&ctx->bytes_pending, len, memory_order_relaxed);
-    /* update statistics for "default" namespace*/
-    mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_ns("default", 7);
-    if(stats) {
-        atomic_inc64(&stats->reservoir_bytes, len);
-        atomic_inc64(&stats->reservoir_items, 1);
+    if (mcdc_reservoir_add(&g_rvr, src, len) > 0) {
+        atomic_fetch_add_explicit(&ctx->bytes_pending, len, memory_order_relaxed);
+        /* update statistics for "default" namespace*/
+        mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_ns("default", 7);
+        if(stats) {
+            atomic_inc64(&stats->reservoir_bytes, len);
+            atomic_inc64(&stats->reservoir_items, 1);
+        }
     }
 }
 
