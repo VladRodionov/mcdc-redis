@@ -9,7 +9,42 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_cmd_filter.c
+ *
+ * Command filter that transparently rewrites selected Redis String/Hash
+ * commands to their MC/DC wrappers (mcdc.*), so clients keep using native
+ * commands while MC/DC handles compression/decompression.
+ *
+ * Key points:
+ * - Special-case replication of dictionary metadata on replicas:
+ *     HSET mcdc:dict:<id>:mf ...  ->  mcdc.lm <basename> <manifest_blob>
+ *     HSET mcdc:dict:<id>    ...  ->  mcdc.ld <basename> <dict_blob>
+ *   (mcdc.lm / mcdc.ld only read argv[1], argv[2]; extra args ignored).
+ *
+ * - Bypass filter for internal metadata keys:
+ *     mcdc:dict:<id> and mcdc:dict:<id>:mf
+ *
+ * - Controlled by config flags:
+ *     enable_string_filter, enable_hash_filter, async_cmd_enabled
+ *
+ * - When async_cmd_enabled is true:
+ *     MGET  -> mcdc.mgetasync   (else mcdc.mget)
+ *     MSET  -> mcdc.msetasync   (else mcdc.mset)
+ *     HMGET -> mcdc.hmgetasync  (else mcdc.hmget)
+ *     HSET  -> mcdc.hsetasync   (else mcdc.hset)
+ *
+ * - Wrapped String commands include:
+ *     GET/SET/SETEX/SETNX/PSETEX/GETEX/GETSET/GETDEL/MGET/MSET/MSETNX/STRLEN
+ *   plus compatibility wrappers for:
+ *     APPEND/GETRANGE(SETRANGE)
+ *
+ * - Wrapped Hash commands include:
+ *     HGET/HMGET/HSET/HSETNX/(HSETEX,HGETEX if supported)/HVALS/HGETALL/
+ *     HSTRLEN/HRANDFIELD/HGETDEL
+ *
+ * Other commands (TTL ops, SCAN/HSCAN, etc.) are left untouched.
+ */
 #include "redismodule.h"
 #include "mcdc_cmd_filter.h"
 #include "mcdc_config.h"

@@ -9,7 +9,38 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_hash_async.c
+ *
+ * Asynchronous Hash command helpers for MC/DC (Redis/Valkey module layer).
+ *
+ * Key duties:
+ *   - Implement background-thread variants of hash operations that require
+ *     compression/decompression work:
+ *       - mcdc.hmgetasync: HMGET + parallel decode in worker thread(s)
+ *       - mcdc.hsetasync:  encode/compress values in worker thread(s) + HSET on main thread
+ *   - Use Redis blocked clients to offload CPU-heavy work without stalling
+ *     the Redis event loop.
+ *   - Copy key/value data into per-request arenas to safely process outside
+ *     the Redis thread, then reply and (optionally) repair corrupted fields.
+ *
+ * Design notes:
+ *   - Workers never call Redis APIs except RedisModule_UnblockClient().
+ *   - HMGET path:
+ *       - Executes underlying HMGET first (main thread), copies replies into
+ *         a contiguous value arena, then decodes in background threads.
+ *       - If a value looks compressed but decode fails, marks the field for
+ *         deletion (HDEL) on the main thread (skipped on replicas).
+ *   - HSET path:
+ *       - Copies input values, encodes/compresses in background threads, then
+ *         performs a single HSET on the main thread with encoded/raw values.
+ *   - Thread pool required (see mcdc_thread_pool.*); commands error if not initialized.
+ *
+ * Safety / semantics:
+ *   - Respects replica behavior via mcdc_role.* (no repairs on replicas).
+ *   - Uses “borrowed” RedisModuleString pointers for key/fields only on the
+ *     main thread; worker threads operate solely on copied buffers.
+ */
 #include "mcdc_hash_async.h"
 
 #include "mcdc_thread_pool.h"

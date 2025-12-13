@@ -9,7 +9,32 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_module_utils.c
+ *
+ * Small module helpers shared across commands.
+ *
+ * - MCDC_DelKey():
+ *     Best-effort "delete corrupt key" helper.
+ *     * On replicas: never deletes (logs + returns OK).
+ *     * On masters: DEL with "!" so it replicates / is AOF’d.
+ *
+ * - write_u16()/read_u16():
+ *     Encode/decode a 16-bit dictionary id header.
+ *     Uses 0xFFFF as a sentinel for "-1".
+ *
+ * - MC/DC value layout:
+ *     [2 bytes dict_id (network order)][payload...]
+ *       dict_id == 0    -> Zstd-compressed without dict
+ *       dict_id  > 0    -> Zstd-compressed with dictionary <dict_id>
+ *
+ * - mcdc_encode_value()/mcdc_decode_value():
+ *     Thin wrappers around mcdc_maybe_compress/mcdc_maybe_decompress.
+ *     Encode prepends dict_id; decode reads it and decompresses payload.
+ *
+ * - nsec_now():
+ *     Monotonic timestamp helper (ns).
+ */
 #include <time.h>
 #include <string.h>
 #include "redismodule.h"

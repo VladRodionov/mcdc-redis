@@ -26,7 +26,7 @@
  * limitations under the License.
  */
 /*
- * mcdc_cmd.c - Implementation of MC/DC command extensions for memcached.
+ * mcdc_cmd.c - Implementation of MC/DC command extensions for Redis/Valkey.
  *
  * This file adds support for custom ASCII commands:
  *

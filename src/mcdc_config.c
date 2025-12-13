@@ -13,7 +13,7 @@
 /*
  * mcdc_config.c
  *
- * Configuration parsing and runtime options for memcached-Zstd (MC/DC).
+ * Configuration parsing and runtime options for MC/DC.
  *
  * Responsibilities:
  *   - Define configuration structures (compression level, dictionary paths, limits).

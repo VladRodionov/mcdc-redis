@@ -9,7 +9,34 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_module.c
+ *
+ * Module entrypoint (RedisModule_OnLoad).
+ *
+ * Responsibilities:
+ * - RedisModule_Init(name, version, APIv1).
+ * - Detect Redis version once; set g_mcdc_has_hsetex if server >= 8.0.0
+ *   (used by capability checks for HSETEX/HGETEX).
+ * - Parse/load module config (MCDC_LoadConfig) and log current working dir.
+ * - Initialize core MC/DC state (mcdc_init) and Redis env integration
+ *   (MCDC_EnvRedisInit: dict publisher / id provider, etc).
+ * - Initialize module logger (MCDC_ModuleInitLogger).
+ * - Register all commands:
+ *     * admin
+ *     * string commands + “unsupported string” wrappers (append/getrange/setrange)
+ *     * role debug (mcdc.role)
+ *     * async string commands (mcdc.mgetasync / mcdc.msetasync)
+ *     * hash commands + async HSET/HMGET
+ *     * async dict load commands
+ * - Register the command filter that rewrites native Redis commands (GET/SET/H*)
+ *   into mcdc.* equivalents (and handles special dict metadata rewrite).
+ * - If async commands are enabled, start thread pool using config:
+ *     threads = async_thread_pool_size, queue = async_queue_size.
+ *
+ * Outcome:
+ * - Logs “module loaded” + thread-pool info (if enabled) and returns OK.
+ */
 #include <string.h>
 #include <unistd.h>   // getcwd
 #include <limits.h>   // PATH_MAX

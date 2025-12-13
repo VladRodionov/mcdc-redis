@@ -9,7 +9,50 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_mset_async2.c
+ *
+ * Asynchronous MSET implementation for MC/DC using the module thread pool.
+ *
+ * Key duties:
+ *   - Implement `mcdc.msetasync` which compresses/encodes values off-thread
+ *     and applies writes on the Redis main thread.
+ *   - Use an arena-style memory layout to minimize per-pair allocations:
+ *       - `key_blob` holds all key bytes contiguously (+ per-key offsets/lengths)
+ *       - `val_blob` holds all raw input values contiguously (+ per-value offsets/lengths)
+ *   - Preserve Redis semantics for MSET-like writes while keeping the hot path
+ *     batch-friendly and allocation-efficient.
+ *
+ * Execution model:
+ *   - Main thread:
+ *       1) Validates args and thread pool availability.
+ *       2) Builds a `MCDC_MSetJob` with compact arenas + metadata arrays.
+ *       3) Blocks the client and submits the job to the worker pool.
+ *   - Worker thread(s):
+ *       - For each (key,value) pair, attempts `mcdc_encode_value(key_ctx, ...)`.
+ *       - If encoding succeeds, copies the encoded bytes into `out_bufs[i]`.
+ *       - If encoding is skipped/fails (or worker OOM), falls back to raw bytes
+ *         from `val_blob` (no write-time compression).
+ *   - Unblock callback (main thread):
+ *       - Iterates pairs and writes each value via `RedisModule_OpenKey` +
+ *         `RedisModule_StringSet`.
+ *       - Replies `OK` on full success, otherwise returns an error if one or
+ *         more keys could not be set.
+ *       - Frees all arenas and any per-pair encoded buffers.
+ *
+ * Error handling & safety:
+ *   - Worker performs no RedisModule_* calls except `RedisModule_UnblockClient`.
+ *   - Encoded payloads are copied into job-owned malloc buffers to avoid
+ *     lifetime assumptions about `mcdc_encode_value()` output.
+ *   - Cleanup is centralized in `MCDC_MSetAsyncJobFree()` to prevent leaks.
+ *
+ * Notes:
+ *   - This implementation sets keys one-by-one on the main thread (not via a
+ *     single `MSET` call) to avoid building large argv vectors and to keep the
+ *     module logic explicit and debuggable.
+ *   - Compression can be bypassed per value if the encoder decides it is not
+ *     beneficial or if the worker cannot allocate memory for the encoded copy.
+ */
 #include "mcdc_mset_async.h"
 
 #include "mcdc_thread_pool.h"

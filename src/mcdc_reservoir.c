@@ -9,6 +9,36 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
+/*
+ * mcdc_reservoir.c
+ *
+ * Reservoir sampler used by MC/DC internal dictionary training.
+ *
+ * Key duties:
+ *   - Maintain a bounded, approximate training corpus under a byte budget
+ *     (max_bytes) and optional time window (duration_sec).
+ *   - Support “session” lifecycle: init once, start session on demand,
+ *     report readiness, snapshot samples for Zstd training, then reset.
+ *   - Implement a two-phase sampler:
+ *       1) Warmup: append samples until hitting max_bytes or max_items,
+ *          then “freeze” k = stored.
+ *       2) Reservoir mode: classic replacement (Algorithm R) with fixed k,
+ *          updating existing slots without growing the slot array.
+ *
+ * Concurrency / performance notes:
+ *   - Thread-safety is provided via a lightweight try-lock (atomic_flag).
+ *     Add operations are non-blocking: on lock contention the sample is dropped.
+ *   - Hot path aims to stay O(1) per sample; per-sample memory allocation is
+ *     limited to the payload copy that may be stored into a slot.
+ *   - Snapshot takes exclusive ownership (spins until lock acquired) and
+ *     materializes samples into a flat buffer + sizes[] for Zstd training.
+ *
+ * Correctness notes:
+ *   - Byte budget is enforced during warmup; after freezing, total bytes may
+ *     drift due to replacements (accepted trade-off for simplicity).
+ *   - start_ts == 0 indicates “no active session”; trainer starts a session
+ *     via mcdc_reservoir_check_start_session() and resets via reset_session().
+ */
 #include "mcdc_reservoir.h"
 #include "mcdc_log.h"
 
@@ -263,8 +293,6 @@ mcdc_reservoir_add(mcdc_reservoir_t *r,
 
     /* Training window ended? */
     if (!mcdc_reservoir_active(r)) {
-        mcdc_log(MCDC_LOG_INFO, "Not Active?");
-
         return 0;
     }
 

@@ -9,7 +9,37 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_env.c
+ *
+ * Environment / integration glue layer for MC/DC.
+ *
+ * Key duties:
+ *   - Provide a small, stable API surface that the core uses for
+ *     deployment-specific hooks (filesystem locations, publishing, ID allocation).
+ *   - Expose the configured dictionary directory and trigger dictionary reloads.
+ *
+ * Node role management:
+ *   - Track the node’s role (primary/replica/undefined) via an atomic global.
+ *   - Notify the core on role changes (mcdc_core_on_role_change) so it can
+ *     start/stop background activities like trainer and GC as appropriate.
+ *
+ * Dictionary distribution hooks:
+ *   - Optional “publisher” callback used to broadcast newly built dictionaries
+ *     (dict + manifest) to external systems (registry, control plane, etc.).
+ *   - If no publisher is installed, publishing is treated as a no-op success.
+ *
+ * Dictionary ID allocation hooks:
+ *   - Optional ID provider that lets deployments allocate/release cluster-safe
+ *     dictionary IDs outside the module (e.g., via an external registry).
+ *   - Calls are guarded by an “installed” atomic flag; if not installed, the
+ *     alloc/release APIs return an error.
+ *
+ * Notes:
+ *   - This file intentionally contains minimal logic and no Redis key access.
+ *   - Hooks are designed to keep the core portable across Redis/Valkey builds
+ *     and different deployment environments.
+ */
 #include "mcdc_env.h"
 #include "mcdc_compression.h"
 #include <string.h>

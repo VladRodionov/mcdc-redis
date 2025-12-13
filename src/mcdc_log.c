@@ -9,7 +9,29 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_log.c
+ *
+ * Centralized logging abstraction for MC/DC.
+ *
+ * Key duties:
+ *   - Provide a lightweight, pluggable logging interface for the core.
+ *   - Allow integration with Redis logging, custom loggers, or stderr fallback.
+ *   - Support both variadic and va_list-based logging entry points.
+ *
+ * Design notes:
+ *   - Logging backend is injected via mcdc_set_logger().
+ *   - If no logger is installed, messages are written to stderr.
+ *   - Logging calls are intentionally minimal and allocation-free.
+ *
+ * Threading:
+ *   - Safe for concurrent use assuming the installed logger is thread-safe.
+ *   - No internal locking is performed in this layer.
+ *
+ * Rationale:
+ *   - Keeps core logic independent from RedisModule logging APIs.
+ *   - Enables reuse of MC/DC components outside Redis/Valkey if needed.
+ */
 #include "mcdc_log.h"
 #include <stdio.h>
 #include <pthread.h>

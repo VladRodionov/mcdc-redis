@@ -9,7 +9,47 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_hmget_async2.c
+ *
+ * Asynchronous MGET wrapper for MC/DC using the module thread pool.
+ *
+ * Key duties:
+ *   - Implement `mcdc.mgetasync` which fetches values via a single main-thread
+ *     `MGET`, then decodes MC/DC-compressed payloads off-thread.
+ *   - Use arena-style memory layout to avoid per-key allocations:
+ *       - `key_blob` holds all key bytes contiguously (+ per-key offsets/lengths)
+ *       - `val_blob` holds all fetched values contiguously (+ per-key offsets/lengths)
+ *   - Return results in original key order, passing through raw values when
+ *     they are not MC/DC-compressed.
+ *
+ * Execution model:
+ *   - Main thread:
+ *       1) Validates args + thread pool availability.
+ *       2) Calls underlying `MGET` once.
+ *       3) Builds a `MCDC_MGetJob` with compact arenas + metadata arrays.
+ *       4) Blocks the client and submits the job to the worker pool.
+ *   - Worker thread(s):
+ *       - For each non-NULL reply, detects MC/DC framing and attempts
+ *         `mcdc_decode_value(key_ctx, value, ...)` using the key as context.
+ *       - On decode failure for “looks compressed” values, marks the entry NULL
+ *         and sets `err_flags[i]` to request deletion on the main thread.
+ *   - Unblock callback (main thread):
+ *       - Replies with an array of bulk strings / NULLs.
+ *       - Deletes keys whose values appeared compressed but failed to decode,
+ *         matching the sync GET/MGET “self-heal” behavior.
+ *
+ * Error handling & safety:
+ *   - Worker performs no RedisModule_* calls except `RedisModule_UnblockClient`.
+ *   - All decoded buffers are freed in the unblock callback via
+ *     `MCDC_MGetAsyncJobFree()`.
+ *   - Arena allocations are all-or-nothing; failures abort cleanly.
+ *
+ * Notes:
+ *   - This file is intentionally optimized for batch reads: one Redis call,
+ *     linear arena copies, and parallel decode.
+ *   - Corruption cleanup uses `MCDC_DelKey()` on the main thread.
+ */
 #include "mcdc_mget_async.h"
 #include "mcdc_thread_pool.h"
 #include "mcdc_compression.h"

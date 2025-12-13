@@ -9,7 +9,18 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_role.c
+ *
+ * Debug-only command:
+ *   mcdc.role
+ *
+ * Prints current node role (master/replica) and relevant Redis context flags:
+ *   MASTER, REPLICA, REPLICATED (command executed via replication/AOF),
+ *   LOADING (loading dataset / AOF).
+ *
+ * Intended for quick sanity checks during replication / AOF testing.
+ */
 #include "mcdc_role.h"
 #include <string.h>
 #include "mcdc_role.h"

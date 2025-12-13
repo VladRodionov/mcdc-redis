@@ -9,7 +9,34 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_dict_load_async.c
+ *
+ * Asynchronous (blocked-client) dictionary/manifest loader for MC/DC.
+ *
+ * Key duties:
+ *   - Implement `mcdc.lm <basename> <manifest_blob>` and
+ *     `mcdc.ld <basename> <dict_blob>` commands.
+ *   - Persist received blobs into the local dictionary directory as:
+ *       <dict_dir>/<basename>.mf   (manifest)
+ *       <dict_dir>/<basename>.dict (dictionary)
+ *   - Offload filesystem I/O to a dedicated pthread to avoid blocking Redis.
+ *   - Unblock the client on completion and return "OK" (or an error with rc).
+ *
+ * How it works:
+ *   - The command handler blocks the client and enqueues a small job struct.
+ *   - A worker thread writes the file, then calls RedisModule_UnblockClient()
+ *     with an integer status code (cast through intptr_t).
+ *   - For dictionaries (`mcdc.ld`), the worker triggers a dictionary reload
+ *     after a successful write (mcdc_env_reload_dicts()).
+ *
+ * Notes:
+ *   - Commands are registered as "readonly" because they do not mutate Redis keys;
+ *     they only write local files under MC/DC’s dictionary directory.
+ *   - Worker thread must not call Redis APIs other than UnblockClient.
+ *   - The basename is treated as a file name component; callers should ensure
+ *     it is safe (no path traversal) and consistent across cluster nodes.
+ */
 #include "mcdc_dict_load_async.h"
 #include "mcdc_log.h"
 #include "mcdc_env.h"
@@ -20,22 +47,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <pthread.h>
-
-/*
- * Async commands:
- *
- *   mcdc.lm <basename> <manifest_blob>
- *   mcdc.ld <basename> <dict_blob>
- *
- * Both:
- *   - Are logically "readonly" from Redis POV (no key mutations)
- *   - Write blobs into the local dictionary directory:
- *        <dict_dir>/<basename>.mf
- *        <dict_dir>/<basename>.dict
- *   - Run file I/O in a dedicated pthread
- *   - Reply "OK" on success, or an error on failure.
- *
- */
 
 /* -------------------------------------------------------------------------
  * Internal types

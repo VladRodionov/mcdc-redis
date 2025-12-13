@@ -10,6 +10,37 @@
  * See LICENSE-COMMUNITY.txt for details.
  */
 
+/*
+ * mcc_mget_async.c
+ *
+ * Async MGET wrapper for MC/DC (Redis Module).
+ *
+ * Key duties:
+ *   - Implement `mcdc.mgetasync` as a blocked Redis command that offloads
+ *     decompression work to the module thread pool.
+ *   - Fetch values on the Redis main thread via a single underlying `MGET`
+ *     call, then snapshot key/value bytes into heap buffers for worker use.
+ *   - In worker threads:
+ *       - Detect MC/DC-compressed payloads (2-byte dict id prefix + Zstd frame).
+ *       - Decode compressed values using the *key bytes* as compression context.
+ *       - Treat decode failures as corruption/false-positives: return NULL for
+ *         that key and flag it for deletion.
+ *   - In the unblock (main-thread) callback:
+ *       - Reply with an array of values / NULLs matching Redis `MGET` semantics.
+ *       - Delete keys whose values looked compressed but failed to decode
+ *         (same “self-heal” behavior as sync GET/MGET wrappers).
+ *       - Free all per-job allocations (key/value snapshots, decoded buffers,
+ *         and per-key metadata arrays).
+ *
+ * Notes:
+ *   - Worker threads must not call RedisModule APIs except
+ *     `RedisModule_UnblockClient()`.
+ *   - This “v1” implementation uses per-key malloc’d buffers (`key_bufs[]`,
+ *     `in_bufs[]`) rather than a single arena. Newer arena-based variants can
+ *     reduce allocation churn for large batches.
+ *   - Fast-path passthrough for non-compressed values avoids re-encoding and
+ *     preserves original payload bytes.
+ */
 #include "mcdc_mget_async.h"
 #include "mcdc_thread_pool.h"
 #include "mcdc_compression.h"

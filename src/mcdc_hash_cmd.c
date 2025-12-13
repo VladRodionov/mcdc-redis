@@ -9,7 +9,45 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_hash_cmd.c
+ *
+ * Synchronous Hash command wrappers for MC/DC (Redis/Valkey module layer).
+ *
+ * Key duties:
+ *   - Provide drop-in hash commands that transparently decode MC/DC-compressed
+ *     hash values on reads and encode/compress values on writes.
+ *   - Preserve Redis-compatible semantics while adding corruption handling
+ *     (delete bad fields when possible).
+ *
+ * Commands implemented/registered here:
+ *   - Read wrappers (decode when needed):
+ *       mcdc.hget, mcdc.hgetex, mcdc.hmget, mcdc.hvals, mcdc.hgetall,
+ *       mcdc.hrandfield (WITHVALUES), mcdc.hgetdel
+ *   - Write wrappers (encode when allowed):
+ *       mcdc.hset, mcdc.hsetex, mcdc.hsetnx
+ *   - Length helpers:
+ *       mcdc.hstrlen  (logical length; uses frame content size when compressed)
+ *       mcdc.chstrlen (compressed length passthrough via HSTRLEN)
+ *
+ * Design notes:
+ *   - Compression context is the hash key name (stable per hash) and is passed
+ *     into the compression layer for both encode/decode.
+ *   - Hot path avoids decoding when the value is not MC/DC-compressed.
+ *   - On decode failure (corrupt compressed blob):
+ *       - where the field name is known, the field is deleted (HDEL)
+ *       - on replicas, deletions are skipped to avoid mutating state
+ *       - where the field name is unknown (e.g., HVALS), the command returns
+ *         NULL for that element without attempting repair.
+ *   - Write wrappers respect role / replay state via MCDC_ShouldCompress():
+ *       - replica or AOF replay => forward raw values (no compression)
+ *       - master normal traffic => encode/compress before calling Redis HSET/HSETEX.
+ *
+ * Compatibility:
+ *   - Uses RedisModule_Call wrappers around native Redis hash commands.
+ *   - Uses ZSTD_getFrameContentSize() for logical length when values are stored
+ *     compressed, avoiding full decompression for HSTRLEN semantics.
+ */
 #include "mcdc_hash_cmd.h"
 
 #include "mcdc_compression.h"

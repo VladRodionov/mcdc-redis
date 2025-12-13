@@ -9,7 +9,54 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_string_cmd.c
+ *
+ * MC/DC wrappers for Redis String commands. Goal: keep client-visible behavior
+ * identical, while storing values as:
+ *
+ *   [2-byte dict_id (network order)][zstd frame...]
+ *
+ * Core rules:
+ * - On replicas / during replication / AOF replay: NO compression.
+ *   We just forward to the underlying Redis command with the same args.
+ * - On master normal writes: compress via mcdc_encode_value(key,value).
+ * - On reads: if value "looks compressed" (mcdc_is_compressed on payload),
+ *   decode via mcdc_decode_value(key, stored_blob). If decode fails, delete
+ *   the key (master only) and return NULL/0 depending on command semantics.
+ *
+ * Implemented commands:
+ * - mcdc.set    key value [SET options...]    -> SET key <encoded> [options...]
+ *   * Detects GET option; if GET is used, decodes the returned old value.
+ *
+ * - mcdc.setex / mcdc.psetex / mcdc.setnx
+ *   -> compress value then forward to SETEX/PSETEX/SETNX with encoded value.
+ *
+ * - mcdc.get / mcdc.getdel / mcdc.getex / mcdc.getset
+ *   -> call underlying command, decode if stored value is MC/DC-compressed.
+ *      On decode failure: DEL key (master) and return (nil).
+ *
+ * - mcdc.mget
+ *   -> MGET then per-element decode if compressed; on decode failure: DEL key
+ *      and return (nil) for that element.
+ *
+ * - mcdc.mset / mcdc.msetnx
+ *   -> build argv for MSET/MSETNX with each value encoded; forward as write.
+ *
+ * - mcdc.strlen
+ *   -> returns logical (decoded) length. If compressed, uses
+ *      ZSTD_getFrameContentSize(payload) without decompressing.
+ *      On unknown/error: deletes key and returns 0.
+ *
+ * - mcdc.cstrlen
+ *   -> passthrough STRLEN (compressed/stored length).
+ *
+ * - mcdc.setraw
+ *   -> bypasses MC/DC compression; forwards to plain SET (replicated).
+ *
+ * Registration:
+ *   MCDC_RegisterStringCommands() registers the above module commands.
+ */
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>

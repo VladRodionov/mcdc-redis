@@ -9,7 +9,32 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_mset_async.c
+ *
+ * Async implementation of `mcdc.msetasync` using per-key/per-value heap copies.
+ *
+ * Key duties:
+ *   - Parse `mcdc.msetasync key value [key value ...]` and snapshot inputs into
+ *     per-pair buffers suitable for worker-thread compression.
+ *   - Run `mcdc_encode_value()` on a thread-pool worker for each (key,value)
+ *     pair, using the key bytes as the compression context.
+ *   - Unblock the client on the Redis main thread, perform the actual writes
+ *     via `RedisModule_OpenKey()` + `RedisModule_StringSet()`, and reply `OK`.
+ *
+ * Implementation notes:
+ *   - This version allocates *per-pair* key/value buffers (`key_bufs[]`,
+ *     `in_bufs[]`) and optionally an encoded buffer (`out_bufs[]`). It is
+ *     functionally correct but allocation-heavy compared to the arena-based
+ *     variant (`mcdc_mset_async2.c`).
+ *   - Worker threads must not call RedisModule APIs (except UnblockClient), so
+ *     the worker only prepares encoded buffers and the main thread applies the
+ *     writes.
+ *   - On encode failure or when compression is skipped, the code falls back to
+ *     storing the original raw value.
+ *   - Cleanup is centralized in the unblock callback to ensure each allocation
+ *     is freed exactly once.
+ */
 #include "mcdc_mset_async.h"
 
 #include "mcdc_thread_pool.h"

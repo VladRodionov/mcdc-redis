@@ -9,7 +9,29 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_module_log.c
+ *
+ * Redis/Valkey module logging integration for MC/DC.
+ *
+ * Key duties:
+ *   - Bridge MC/DC’s internal logging API to RedisModule_Log().
+ *   - Map MC/DC log levels to Redis log severity levels.
+ *   - Install a Redis-backed logger at module initialization time.
+ *
+ * Design notes:
+ *   - Uses a shared ThreadSafeContext obtained from the Redis environment.
+ *   - Logging is safe to call from background threads (trainer, GC, loaders).
+ *   - Falls back to stderr if Redis logging is not yet initialized.
+ *
+ * Lifecycle:
+ *   - MCDC_ModuleInitLogger() installs the Redis-backed logger.
+ *   - MCDC_ModuleShutdownLogger() restores stderr logging and releases context.
+ *
+ * Rationale:
+ *   - Keeps core logging logic Redis-agnostic.
+ *   - Centralizes Redis-specific logging behavior in one module-facing layer.
+ */
 #include "mcdc_module_log.h"
 #include "mcdc_log.h"
 #include "mcdc_env_redis.h"

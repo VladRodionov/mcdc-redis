@@ -9,7 +9,28 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_string_unsupported_cmd.c
+ *
+ * Compatibility wrappers for Redis String commands that are not safe
+ * to run directly on MC/DC–compressed values.
+ *
+ * Strategy:
+ *   - Detect MC/DC-compressed string values.
+ *   - Transparently decode (downgrade) them back to raw Redis strings,
+ *     preserving TTL.
+ *   - Delegate the original Redis command afterward.
+ *
+ * Covered commands:
+ *   - mcdc.append
+ *   - mcdc.getrange
+ *   - mcdc.setrange
+ *
+ * Notes:
+ *   - Downgrade is destructive (compression is removed).
+ *   - Corrupted compressed values are deleted to preserve Redis semantics.
+ *   - Ensures correctness over compression for unsupported string ops.
+ */
 #include "mcdc_string_unsupported_cmd.h"
 #include "mcdc_compression.h"   /* mcdc_is_compressed, mcdc_decode_value */
 #include "redismodule.h"

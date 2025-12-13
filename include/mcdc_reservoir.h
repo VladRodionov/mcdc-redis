@@ -53,7 +53,7 @@ void mcdc_reservoir_check_start_session(mcdc_reservoir_t *r);
 int    mcdc_reservoir_active(mcdc_reservoir_t *r);
 size_t mcdc_reservoir_size(mcdc_reservoir_t *r);
 
-/* New: training-window completion & reset */
+/* Training-window completion & reset */
 int  mcdc_reservoir_ready(mcdc_reservoir_t *r);
 void mcdc_reservoir_reset_session(mcdc_reservoir_t *r);
 

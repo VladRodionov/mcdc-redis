@@ -9,7 +9,33 @@
  *
  * See LICENSE-COMMUNITY.txt for details.
  */
-
+/*
+ * mcdc_env_redis.c
+ *
+ * Redis/Valkey environment integration for MC/DC.
+ *
+ * Key duties:
+ *   - Provide Redis-backed implementations of the MC/DC “environment” hooks:
+ *       * Dictionary publisher: persists dictionaries + manifests into Redis keys.
+ *       * Dictionary ID provider: allocates/releases dict IDs via a bitmap stored in Redis.
+ *   - Create and manage a shared ThreadSafeContext (g_ts_ctx) so background threads
+ *     (trainer / GC / async loaders) can safely perform Redis calls and logging.
+ *   - Initialize node role (master/replica) at module load and expose entry points
+ *     for role-related wiring.
+ *
+ * Storage layout (Redis keys):
+ *   - mcdc:dict:<id>     (hash) fields: file_name, data   -> dictionary blob
+ *   - mcdc:dict:<id>:mf  (hash) fields: file_name, data   -> manifest blob
+ *   - mcdc:dict:ids      (string bitmap)                 -> dict ID allocation map
+ *
+ * Notes:
+ *   - All Redis calls from non-main threads must be wrapped with
+ *     RedisModule_ThreadSafeContextLock/Unlock.
+ *   - ID allocation uses BITPOS(0) + SETBIT(1); release clears the bit and deletes
+ *     the associated dict/manifest keys.
+ *   - Namespace filtering: MC/DC only intercepts keys under the "mcdc:dict:" prefix;
+ *     these env keys are intentionally in that namespace.
+ */
 #include "redismodule.h"
 #include "mcdc_env.h"
 #include "mcdc_log.h"
@@ -19,16 +45,6 @@
 #include "string.h"
 
 static RedisModuleCtx *g_ts_ctx = NULL; /* shared thread-safe ctx for logging + env */
-
-/* --------------------------------------------------------------------------
- * Redis-backed dictionary publisher
- *
- * Stores:
- *   mcdc:dict:<id>        -> dictionary blob
- *   mcdc:dict:<id>:mf     -> manifest blob
- *
- * Uses ThreadSafeContext so can be called from trainer/GC threads.
- * ------------------------------------------------------------------- ------- */
 
 
 #include "mcdc_log.h"
@@ -144,7 +160,7 @@ MCDC_RedisPublishDict(uint16_t dict_id,
                           field_name, val_name,
                           field_data, mf_data);
 
-    MCDC_LogReply(g_ts_ctx, "RedisPublishDict: HSET manifest", r1);
+    MCDC_LogReply(g_ts_ctx, "RedisPublishDict: HSET manifest: %s", r1);
 
     if (!r1) goto cleanup;
 
@@ -158,7 +174,7 @@ MCDC_RedisPublishDict(uint16_t dict_id,
                           field_name, val_name,
                           field_data, val_data);
 
-    MCDC_LogReply(g_ts_ctx, "RedisPublishDict: HSET dict", r2);
+    MCDC_LogReply(g_ts_ctx, "RedisPublishDict: HSET dict: %s", r2);
 
     if (!r2) goto cleanup;
 
